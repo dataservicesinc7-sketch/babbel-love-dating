@@ -37,7 +37,7 @@ function Discover() {
 
       setMe({ ...user, profile: myProfile })
 
-      // Basic feed: other profiles, later we will add real filters/scoring
+      // Basic feed: other profiles (later we add real filters/scoring)
       const { data: others, error } = await supabase
         .from('profiles')
         .select('id, display_name, date_of_birth, city, relationship_goal, bio, gender')
@@ -103,7 +103,7 @@ function Discover() {
         profile_a: me.id < otherId ? me.id : otherId,
         profile_b: me.id < otherId ? otherId : me.id,
       })
-      setMessage('It is a match! You can chat once chat is enabled.')
+      setMessage('It is a match! Go to Matches to start chatting.')
     } else {
       setMessage('Like sent')
     }
@@ -129,14 +129,27 @@ function Discover() {
         <Link to="/dashboard" className="text-2xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
         </Link>
-        <Link to="/dashboard" className="text-sm hover:text-coral">
-          Dashboard
-        </Link>
+        <div className="flex gap-4 text-sm">
+          <Link to="/matches" className="hover:text-coral">Matches</Link>
+          <Link to="/dashboard" className="hover:text-coral">Dashboard</Link>
+        </div>
       </header>
 
       <main className="max-w-xl mx-auto px-4">
         <h1 className="text-3xl font-semibold mb-4 text-center">Discover</h1>
-        {message && <p className="text-center text-sm text-coral mb-4">{message}</p>}
+        {message && (
+          <p className="text-center text-sm text-coral mb-4">
+            {message}
+            {message.includes('match') && (
+              <>
+                {' '}
+                <Link to="/matches" className="underline font-medium">
+                  Open Matches
+                </Link>
+              </>
+            )}
+          </p>
+        )}
 
         {profiles.length === 0 ? (
           <div className="text-center text-gray-400 mt-10">
