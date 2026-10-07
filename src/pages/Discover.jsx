@@ -40,11 +40,26 @@ function Discover() {
 
       setMe({ ...user, profile: myProfile })
 
-      const { data: others, error } = await supabase
+      // Get blocked users so we hide them
+      const { data: blocked } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', user.id)
+
+      const blockedIds = (blocked || []).map(b => b.blocked_id)
+
+      // Fetch profiles
+      let query = supabase
         .from('profiles')
         .select('id, display_name, date_of_birth, city, relationship_goal, bio, gender')
         .neq('id', user.id)
         .limit(30)
+
+      if (blockedIds.length > 0) {
+        query = query.not('id', 'in', `(${blockedIds.join(',')})`)
+      }
+
+      const { data: others, error } = await query
 
       if (error) {
         setMessage(error.message)
@@ -52,21 +67,29 @@ function Discover() {
         return
       }
 
-      const withPhotos = []
-      for (const p of others || []) {
-        const { data: photoRows } = await supabase
+      // Faster photo loading – one query for all
+      const ids = (others || []).map(p => p.id)
+      let photoMap = {}
+      if (ids.length > 0) {
+        const { data: allPhotos } = await supabase
           .from('photos')
-          .select('storage_path')
-          .eq('profile_id', p.id)
+          .select('profile_id, storage_path')
+          .in('profile_id', ids)
           .order('sort_order')
-          .limit(1)
 
-        const path = photoRows?.[0]?.storage_path
-        const photo = path
-          ? supabase.storage.from('profile-photos').getPublicUrl(path).data.publicUrl
-          : null
-        withPhotos.push({ ...p, photo })
+        for (const ph of allPhotos || []) {
+          if (!photoMap[ph.profile_id]) {
+            photoMap[ph.profile_id] = supabase.storage
+              .from('profile-photos')
+              .getPublicUrl(ph.storage_path).data.publicUrl
+          }
+        }
       }
+
+      const withPhotos = (others || []).map(p => ({
+        ...p,
+        photo: photoMap[p.id] || null
+      }))
 
       setProfiles(withPhotos)
       setLoading(false)
@@ -106,36 +129,44 @@ function Discover() {
       setMessage('Like sent')
     }
 
-    setProfiles((prev) => prev.filter((p) => p.id !== otherId))
+    setProfiles(prev => prev.filter(p => p.id !== otherId))
   }
 
   const passProfile = (otherId) => {
-    setProfiles((prev) => prev.filter((p) => p.id !== otherId))
+    setProfiles(prev => prev.filter(p => p.id !== otherId))
   }
 
   const blockProfile = async (otherId) => {
     if (!me) return
-    await supabase.from('blocks').insert({
+    const { error } = await supabase.from('blocks').insert({
       blocker_id: me.id,
       blocked_id: otherId,
     })
+    if (error) {
+      setMessage('Error blocking: ' + error.message)
+      return
+    }
     setMessage('User blocked')
-    setProfiles((prev) => prev.filter((p) => p.id !== otherId))
+    setProfiles(prev => prev.filter(p => p.id !== otherId))
   }
 
   const submitReport = async () => {
     if (!me || !reportTarget || !reportReason) return
-    await supabase.from('reports').insert({
+    const { error } = await supabase.from('reports').insert({
       reporter_id: me.id,
       reported_id: reportTarget,
       reason: reportReason,
       details: reportDetails || null,
     })
+    if (error) {
+      setMessage('Error reporting: ' + error.message)
+      return
+    }
     setMessage('Report submitted. Thank you.')
     setReportTarget(null)
     setReportReason('')
     setReportDetails('')
-    setProfiles((prev) => prev.filter((p) => p.id !== reportTarget))
+    setProfiles(prev => prev.filter(p => p.id !== reportTarget))
   }
 
   if (loading) {
@@ -166,9 +197,7 @@ function Discover() {
             {message.includes('match') && (
               <>
                 {' '}
-                <Link to="/matches" className="underline font-medium">
-                  Open Matches
-                </Link>
+                <Link to="/matches" className="underline font-medium">Open Matches</Link>
               </>
             )}
           </p>
@@ -238,7 +267,7 @@ function Discover() {
           </div>
         )}
 
-        {/* Simple Report Modal */}
+        {/* Report Modal */}
         {reportTarget && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
             <div className="bg-navy-light p-6 rounded-2xl max-w-md w-full">
