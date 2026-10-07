@@ -7,6 +7,7 @@ import Profile from './pages/Profile'
 import Discover from './pages/Discover'
 import Matches from './pages/Matches'
 import Chat from './pages/Chat'
+import Safety from './pages/Safety'
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/discover" element={<Discover />} />
           <Route path="/matches" element={<Matches />} />
           <Route path="/chat/:matchId" element={<Chat />} />
+          <Route path="/safety" element={<Safety />} />
         </Routes>
       </div>
     </BrowserRouter>
