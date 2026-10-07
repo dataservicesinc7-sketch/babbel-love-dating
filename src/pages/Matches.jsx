@@ -58,4 +58,18 @@ function Matches() {
         ) : (
           <div className="space-y-4">
             {matches.map(m => (
-              <Link key={m.id}
+              <Link key={m.id} to={`/chat/${m.id}`}
+                className="block bg-navy-light p-4 rounded-xl hover:bg-navy transition">
+                <p className="font-medium text-lg">{m.other?.display_name || 'Someone'}</p>
+                <p className="text-sm text-gray-400">{m.other?.city || ''}</p>
+                <p className="text-coral text-sm mt-1">Open chat →</p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}
+
+export default Matches
