@@ -79,6 +79,9 @@ function Dashboard() {
           <Link to="/matches" className="border border-gray-500 hover:border-coral py-3 rounded-full font-medium transition">
             My Matches
           </Link>
+          <Link to="/safety" className="border border-gray-500 hover:border-coral py-3 rounded-full font-medium transition">
+            Safety Center
+          </Link>
         </div>
       </main>
     </div>
