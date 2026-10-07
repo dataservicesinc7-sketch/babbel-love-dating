@@ -8,6 +8,7 @@ function Chat() {
   const [messages, setMessages] = useState([])
   const [newMsg, setNewMsg] = useState('')
   const [me, setMe] = useState(null)
+  const [otherName, setOtherName] = useState('Chat')
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef(null)
 
@@ -20,6 +21,23 @@ function Chat() {
       }
       setMe(user)
 
+      // Get the match and the other person's name
+      const { data: match } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('id', matchId)
+        .maybeSingle()
+
+      if (match) {
+        const otherId = match.profile_a === user.id ? match.profile_b : match.profile_a
+        const { data: otherProfile } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', otherId)
+          .maybeSingle()
+        setOtherName(otherProfile?.display_name || 'Someone')
+      }
+
       const { data } = await supabase
         .from('messages')
         .select('*')
@@ -30,7 +48,7 @@ function Chat() {
     }
     init()
 
-    // Realtime subscription
+    // Realtime
     const channel = supabase
       .channel(`chat-${matchId}`)
       .on('postgres_changes', {
@@ -65,24 +83,42 @@ function Chat() {
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-navy text-white"><p>Loading chat...</p></div>
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-navy text-white">
+        <p>Loading chat...</p>
+      </div>
+    )
   }
 
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
       <header className="py-4 px-4 flex justify-between items-center border-b border-gray-700">
         <Link to="/matches" className="text-sm text-coral">← Matches</Link>
-        <span className="font-medium">Chat</span>
-        <div className="w-12"></div>
+        <span className="font-medium text-lg">{otherName}</span>
+        <div className="w-16"></div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map(m => (
-          <div key={m.id} className={`max-w-[80%] p-3 rounded-2xl ${m.sender_id === me?.id ? 'ml-auto bg-coral' : 'bg-navy-light'}`}>
-            <p>{m.content}</p>
-            <p className="text-xs opacity-70 mt-1">{new Date(m.created_at).toLocaleTimeString()}</p>
-          </div>
-        ))}
+        {messages.length === 0 && (
+          <p className="text-center text-gray-500 mt-10">Say hello to {otherName}!</p>
+        )}
+        {messages.map(m => {
+          const isMe = m.sender_id === me?.id
+          return (
+            <div
+              key={m.id}
+              className={`max-w-[80%] p-3 rounded-2xl ${isMe ? 'ml-auto bg-coral' : 'bg-navy-light'}`}
+            >
+              <p className="text-xs opacity-70 mb-1">
+                {isMe ? 'You' : otherName}
+              </p>
+              <p>{m.content}</p>
+              <p className="text-xs opacity-60 mt-1">
+                {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          )
+        })}
         <div ref={bottomRef} />
       </div>
 
@@ -90,10 +126,12 @@ function Chat() {
         <input
           value={newMsg}
           onChange={e => setNewMsg(e.target.value)}
-          placeholder="Type a message..."
+          placeholder={`Message ${otherName}...`}
           className="flex-1 px-4 py-3 rounded-full bg-navy-light border border-gray-600 focus:outline-none focus:border-coral"
         />
-        <button type="submit" className="bg-coral px-5 rounded-full font-medium">Send</button>
+        <button type="submit" className="bg-coral px-5 rounded-full font-medium">
+          Send
+        </button>
       </form>
     </div>
   )
