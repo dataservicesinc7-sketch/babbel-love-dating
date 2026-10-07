@@ -37,8 +37,8 @@ function Safety() {
 
         <section className="bg-navy-light p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-medium mb-3 text-coral">Report & Block</h2>
-          <p className="text-gray-200 mb-2">
-            On every profile and in chat you can Report or Block with one tap.
+          <p className="text-gray-200">
+            On every profile you can Report or Block with one tap.
             Reports of minors, threats or scams are reviewed first.
           </p>
         </section>
