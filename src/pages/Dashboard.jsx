@@ -6,6 +6,7 @@ function Dashboard() {
   const navigate = useNavigate()
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [photoCount, setPhotoCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -17,19 +18,26 @@ function Dashboard() {
       }
       setUser(user)
 
-      const { data } = await supabase
+      const { data: profileData } = await supabase
         .from('profiles')
-        .select('display_name, city, relationship_goal')
+        .select('*')
         .eq('id', user.id)
         .maybeSingle()
 
-      setProfile(data)
+      const { count } = await supabase
+        .from('photos')
+        .select('*', { count: 'exact', head: true })
+        .eq('profile_id', user.id)
+
+      setProfile(profileData)
+      setPhotoCount(count || 0)
       setLoading(false)
     }
+
     load()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) navigate('/login')
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) navigate('/login')
     })
     return () => subscription.unsubscribe()
   }, [navigate])
@@ -42,46 +50,74 @@ function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-navy text-white">
-        <p>Loading...</p>
+        <p className="text-xl">Loading...</p>
       </div>
     )
   }
 
+  const profileReady = profile?.display_name && profile?.city && photoCount > 0
+
   return (
-    <div className="min-h-screen bg-navy text-white">
+    <div className="min-h-screen bg-navy text-white flex flex-col">
       <header className="py-6 px-4 flex justify-between items-center max-w-5xl mx-auto w-full">
         <h1 className="text-2xl md:text-3xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
         </h1>
-        <button onClick={handleLogout} className="px-4 py-2 text-sm font-medium hover:text-coral transition">
+        <button
+          onClick={handleLogout}
+          className="px-5 py-2 bg-coral hover:bg-coral-dark rounded-full text-sm font-medium transition"
+        >
           Log out
         </button>
       </header>
 
-      <main className="max-w-xl mx-auto px-4 pt-10 text-center">
-        <h2 className="text-3xl font-semibold mb-2">
-          Welcome{profile?.display_name ? `, ${profile.display_name}` : ''}!
-        </h2>
-        <p className="text-gray-300 mb-1">{user?.email}</p>
-        {profile?.city && (
-          <p className="text-gray-400 text-sm mb-8">
-            {profile.city} · {profile.relationship_goal || 'Goal not set'}
-          </p>
-        )}
+      <main className="flex-1 flex flex-col items-center justify-center px-4 text-center pb-12">
+        <div className="max-w-xl w-full">
+          <h2 className="text-3xl md:text-4xl font-semibold mb-2">
+            Welcome{profile?.display_name ? `, ${profile.display_name}` : ''}!
+          </h2>
+          <p className="text-gray-300 mb-6">{user?.email}</p>
 
-        <div className="grid gap-4 mt-8">
-          <Link to="/profile" className="bg-coral hover:bg-coral-dark py-3 rounded-full font-medium">
-            Edit Profile
-          </Link>
-          <Link to="/discover" className="border border-coral text-coral hover:bg-coral hover:text-white py-3 rounded-full font-medium transition">
-            Discover People
-          </Link>
-          <Link to="/matches" className="border border-gray-500 hover:border-coral py-3 rounded-full font-medium transition">
-            My Matches
-          </Link>
-          <Link to="/safety" className="border border-gray-500 hover:border-coral py-3 rounded-full font-medium transition">
-            Safety Center
-          </Link>
+          <div className="bg-navy-light rounded-2xl p-6 text-left mb-8 space-y-2">
+            <p><span className="text-gray-400">City:</span> {profile?.city || '—'}</p>
+            <p><span className="text-gray-400">Goal:</span> {profile?.relationship_goal || '—'}</p>
+            <p><span className="text-gray-400">Photos:</span> {photoCount}</p>
+            <p>
+              <span className="text-gray-400">Status:</span>{' '}
+              {profileReady ? (
+                <span className="text-green-400">Ready to discover people</span>
+              ) : (
+                <span className="text-yellow-400">Complete profile + add a photo</span>
+              )}
+            </p>
+          </div>
+
+          <div className="grid gap-3">
+            <Link
+              to="/profile"
+              className="bg-coral hover:bg-coral-dark transition text-white font-medium py-3 px-8 rounded-full"
+            >
+              {profile ? 'Edit Profile' : 'Complete Profile'}
+            </Link>
+            <Link
+              to="/discover"
+              className="border border-coral text-coral hover:bg-coral hover:text-white transition font-medium py-3 px-8 rounded-full"
+            >
+              Discover People
+            </Link>
+            <Link
+              to="/matches"
+              className="border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
+            >
+              My Matches
+            </Link>
+            <Link
+              to="/safety"
+              className="border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
+            >
+              Safety Center
+            </Link>
+          </div>
         </div>
       </main>
     </div>
