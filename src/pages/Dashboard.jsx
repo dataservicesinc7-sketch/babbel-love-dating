@@ -1,27 +1,35 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 function Dashboard() {
   const navigate = useNavigate()
   const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Check if user is logged in
-    const checkUser = async () => {
+    const loadData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         navigate('/login')
-      } else {
-        setUser(user)
+        return
       }
+      setUser(user)
+
+      // Load profile if it exists
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+
+      setProfile(data)
       setLoading(false)
     }
 
-    checkUser()
+    loadData()
 
-    // Listen for logout
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
         navigate('/login')
@@ -63,18 +71,30 @@ function Dashboard() {
       <main className="flex-1 flex flex-col items-center justify-center px-4 text-center">
         <div className="max-w-xl">
           <h2 className="text-3xl md:text-4xl font-semibold mb-4">
-            Welcome!
+            Welcome{profile?.display_name ? `, ${profile.display_name}` : ''}!
           </h2>
-          <p className="text-lg text-gray-300 mb-2">
-            You are logged in as:
-          </p>
-          <p className="text-coral text-xl font-medium mb-8">
-            {user?.email}
-          </p>
-          <p className="text-gray-400">
-            This is your temporary dashboard.<br />
-            Next we will build the profile page.
-          </p>
+
+          <p className="text-lg text-gray-300 mb-2">Logged in as:</p>
+          <p className="text-coral text-xl font-medium mb-8">{user?.email}</p>
+
+          {profile ? (
+            <div className="bg-navy-light p-6 rounded-2xl text-left mb-8">
+              <p><span className="text-gray-400">City:</span> {profile.city || '—'}</p>
+              <p><span className="text-gray-400">Looking for:</span> {profile.looking_for || '—'}</p>
+              <p><span className="text-gray-400">Goal:</span> {profile.relationship_goal || '—'}</p>
+            </div>
+          ) : (
+            <p className="text-gray-400 mb-8">
+              You have not completed your profile yet.
+            </p>
+          )}
+
+          <Link
+            to="/profile"
+            className="inline-block bg-coral hover:bg-coral-dark transition-colors text-white font-medium py-3 px-8 rounded-full text-lg"
+          >
+            {profile ? 'Edit Profile' : 'Complete Your Profile'}
+          </Link>
         </div>
       </main>
     </div>
