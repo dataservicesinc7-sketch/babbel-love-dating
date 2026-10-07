@@ -23,8 +23,8 @@ function Login() {
       setMessage(error.message)
       setLoading(false)
     } else {
-      // Successfully logged in
-      navigate('/')
+      // Successfully logged in → go to dashboard
+      navigate('/dashboard')
     }
   }
 
