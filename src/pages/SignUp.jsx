@@ -8,21 +8,61 @@ function SignUp() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [isError, setIsError] = useState(false)
 
   const handleSignUp = async (e) => {
     e.preventDefault()
     setLoading(true)
     setMessage('')
+    setIsError(false)
 
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: email.trim(),
       password,
+      options: {
+        emailRedirectTo: 'https://babbel-love-dating.pages.dev/dashboard'
+      }
     })
 
     if (error) {
+      setIsError(true)
+      setMessage(error.message)
+      setLoading(false)
+      return
+    }
+
+    // Success case
+    if (data?.user?.identities?.length === 0) {
+      // User already exists
+      setIsError(true)
+      setMessage('This email is already registered. Please log in instead.')
+    } else {
+      setIsError(false)
+      setMessage('Account created! Please check your email (and spam folder) for the confirmation link.')
+    }
+    setLoading(false)
+  }
+
+  const handleResend = async () => {
+    if (!email) {
+      setMessage('Please enter your email first')
+      setIsError(true)
+      return
+    }
+    setLoading(true)
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: {
+        emailRedirectTo: 'https://babbel-love-dating.pages.dev/dashboard'
+      }
+    })
+    if (error) {
+      setIsError(true)
       setMessage(error.message)
     } else {
-      setMessage('Check your email for the confirmation link!')
+      setIsError(false)
+      setMessage('Confirmation email resent. Check your inbox and spam folder.')
     }
     setLoading(false)
   }
@@ -66,7 +106,7 @@ function SignUp() {
             </div>
 
             {message && (
-              <p className={`text-sm ${message.includes('Check') ? 'text-green-400' : 'text-red-400'}`}>
+              <p className={`text-sm ${isError ? 'text-red-400' : 'text-green-400'}`}>
                 {message}
               </p>
             )}
@@ -79,6 +119,14 @@ function SignUp() {
               {loading ? 'Creating account...' : 'Sign Up'}
             </button>
           </form>
+
+          <button
+            onClick={handleResend}
+            disabled={loading}
+            className="w-full mt-3 text-sm text-gray-400 hover:text-coral underline"
+          >
+            Resend confirmation email
+          </button>
 
           <p className="mt-6 text-center text-sm text-gray-400">
             Already have an account?{' '}
