@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 function SignUp() {
-  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -17,10 +16,10 @@ function SignUp() {
     setIsError(false)
 
     const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password,
       options: {
-        emailRedirectTo: 'https://babbel-love-dating.pages.dev/dashboard'
+        emailRedirectTo: 'https://babbel-love-dating.pages.dev/login'
       }
     })
 
@@ -31,14 +30,12 @@ function SignUp() {
       return
     }
 
-    // Success case
     if (data?.user?.identities?.length === 0) {
-      // User already exists
       setIsError(true)
-      setMessage('This email is already registered. Please log in instead.')
+      setMessage('This email is already registered. Please log in or use a different email.')
     } else {
       setIsError(false)
-      setMessage('Account created! Please check your email (and spam folder) for the confirmation link.')
+      setMessage('Account created! Please check your email (and spam folder) and click the confirmation link. After confirming, come back here and log in.')
     }
     setLoading(false)
   }
@@ -52,9 +49,9 @@ function SignUp() {
     setLoading(true)
     const { error } = await supabase.auth.resend({
       type: 'signup',
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       options: {
-        emailRedirectTo: 'https://babbel-love-dating.pages.dev/dashboard'
+        emailRedirectTo: 'https://babbel-love-dating.pages.dev/login'
       }
     })
     if (error) {
