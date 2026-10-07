@@ -6,10 +6,11 @@ function Dashboard() {
   const navigate = useNavigate()
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [photoCount, setPhotoCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const loadData = async () => {
+    const load = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         navigate('/login')
@@ -17,25 +18,27 @@ function Dashboard() {
       }
       setUser(user)
 
-      // Load profile if it exists
-      const { data } = await supabase
+      const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .single()
+        .maybeSingle()
 
-      setProfile(data)
+      const { count } = await supabase
+        .from('photos')
+        .select('*', { count: 'exact', head: true })
+        .eq('profile_id', user.id)
+
+      setProfile(profileData)
+      setPhotoCount(count || 0)
       setLoading(false)
     }
 
-    loadData()
+    load()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) {
-        navigate('/login')
-      }
+      if (event === 'SIGNED_OUT' || !session) navigate('/login')
     })
-
     return () => subscription.unsubscribe()
   }, [navigate])
 
@@ -52,9 +55,10 @@ function Dashboard() {
     )
   }
 
+  const profileReady = profile?.display_name && profile?.city && photoCount > 0
+
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
-      {/* Header */}
       <header className="py-6 px-4 flex justify-between items-center max-w-5xl mx-auto w-full">
         <h1 className="text-2xl md:text-3xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
@@ -67,34 +71,37 @@ function Dashboard() {
         </button>
       </header>
 
-      {/* Main content */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 text-center">
-        <div className="max-w-xl">
+        <div className="max-w-xl w-full">
           <h2 className="text-3xl md:text-4xl font-semibold mb-4">
             Welcome{profile?.display_name ? `, ${profile.display_name}` : ''}!
           </h2>
+          <p className="text-gray-300 mb-6">{user?.email}</p>
 
-          <p className="text-lg text-gray-300 mb-2">Logged in as:</p>
-          <p className="text-coral text-xl font-medium mb-8">{user?.email}</p>
-
-          {profile ? (
-            <div className="bg-navy-light p-6 rounded-2xl text-left mb-8">
-              <p><span className="text-gray-400">City:</span> {profile.city || '—'}</p>
-              <p><span className="text-gray-400">Looking for:</span> {profile.looking_for || '—'}</p>
-              <p><span className="text-gray-400">Goal:</span> {profile.relationship_goal || '—'}</p>
-            </div>
-          ) : (
-            <p className="text-gray-400 mb-8">
-              You have not completed your profile yet.
+          <div className="bg-navy-light rounded-2xl p-6 text-left mb-8 space-y-2">
+            <p><span className="text-gray-400">City:</span> {profile?.city || '—'}</p>
+            <p><span className="text-gray-400">Goal:</span> {profile?.relationship_goal || '—'}</p>
+            <p><span className="text-gray-400">Photos:</span> {photoCount}</p>
+            <p>
+              <span className="text-gray-400">Status:</span>{' '}
+              {profileReady ? 'Ready to discover people' : 'Complete profile + add a photo'}
             </p>
-          )}
+          </div>
 
-          <Link
-            to="/profile"
-            className="inline-block bg-coral hover:bg-coral-dark transition-colors text-white font-medium py-3 px-8 rounded-full text-lg"
-          >
-            {profile ? 'Edit Profile' : 'Complete Your Profile'}
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              to="/profile"
+              className="bg-coral hover:bg-coral-dark transition text-white font-medium py-3 px-8 rounded-full"
+            >
+              {profile ? 'Edit Profile' : 'Complete Profile'}
+            </Link>
+            <Link
+              to="/discover"
+              className="border border-coral text-coral hover:bg-coral hover:text-white transition font-medium py-3 px-8 rounded-full"
+            >
+              Discover
+            </Link>
+          </div>
         </div>
       </main>
     </div>
