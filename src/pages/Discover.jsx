@@ -13,6 +13,9 @@ function Discover() {
   const [profiles, setProfiles] = useState([])
   const [message, setMessage] = useState('')
   const [me, setMe] = useState(null)
+  const [reportTarget, setReportTarget] = useState(null)
+  const [reportReason, setReportReason] = useState('')
+  const [reportDetails, setReportDetails] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -37,7 +40,6 @@ function Discover() {
 
       setMe({ ...user, profile: myProfile })
 
-      // Basic feed: other profiles (later we add real filters/scoring)
       const { data: others, error } = await supabase
         .from('profiles')
         .select('id, display_name, date_of_birth, city, relationship_goal, bio, gender')
@@ -50,7 +52,6 @@ function Discover() {
         return
       }
 
-      // Attach first photo if any
       const withPhotos = []
       for (const p of others || []) {
         const { data: photoRows } = await supabase
@@ -78,19 +79,16 @@ function Discover() {
     if (!me) return
     setMessage('')
 
-    // Save like
     const { error } = await supabase.from('likes').insert({
       from_profile: me.id,
       to_profile: otherId,
     })
 
-    // If like already exists, ignore duplicate error for MVP
     if (error && !String(error.message).toLowerCase().includes('duplicate')) {
       setMessage('Error: ' + error.message)
       return
     }
 
-    // Check mutual like
     const { data: mutual } = await supabase
       .from('likes')
       .select('*')
@@ -113,6 +111,31 @@ function Discover() {
 
   const passProfile = (otherId) => {
     setProfiles((prev) => prev.filter((p) => p.id !== otherId))
+  }
+
+  const blockProfile = async (otherId) => {
+    if (!me) return
+    await supabase.from('blocks').insert({
+      blocker_id: me.id,
+      blocked_id: otherId,
+    })
+    setMessage('User blocked')
+    setProfiles((prev) => prev.filter((p) => p.id !== otherId))
+  }
+
+  const submitReport = async () => {
+    if (!me || !reportTarget || !reportReason) return
+    await supabase.from('reports').insert({
+      reporter_id: me.id,
+      reported_id: reportTarget,
+      reason: reportReason,
+      details: reportDetails || null,
+    })
+    setMessage('Report submitted. Thank you.')
+    setReportTarget(null)
+    setReportReason('')
+    setReportDetails('')
+    setProfiles((prev) => prev.filter((p) => p.id !== reportTarget))
   }
 
   if (loading) {
@@ -179,6 +202,7 @@ function Discover() {
                     {p.city || '—'} · {p.relationship_goal || '—'}
                   </p>
                   {p.bio && <p className="mt-3 text-gray-200">{p.bio}</p>}
+
                   <div className="flex gap-3 mt-5">
                     <button
                       onClick={() => passProfile(p.id)}
@@ -193,9 +217,69 @@ function Discover() {
                       Like
                     </button>
                   </div>
+
+                  <div className="flex gap-3 mt-3 text-sm">
+                    <button
+                      onClick={() => blockProfile(p.id)}
+                      className="flex-1 border border-gray-600 rounded-full py-2 text-gray-300"
+                    >
+                      Block
+                    </button>
+                    <button
+                      onClick={() => setReportTarget(p.id)}
+                      className="flex-1 border border-gray-600 rounded-full py-2 text-gray-300"
+                    >
+                      Report
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}
+          </div>
+        )}
+
+        {/* Simple Report Modal */}
+        {reportTarget && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-navy-light p-6 rounded-2xl max-w-md w-full">
+              <h3 className="text-xl font-semibold mb-4">Report this profile</h3>
+              <select
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 mb-3"
+              >
+                <option value="">Select a reason...</option>
+                <option value="fake">Fake profile / stolen photos</option>
+                <option value="scam">Romance scam / money request</option>
+                <option value="harassment">Harassment</option>
+                <option value="underage">Underage</option>
+                <option value="nudity">Inappropriate photos</option>
+                <option value="hate">Hate speech</option>
+                <option value="other">Other</option>
+              </select>
+              <textarea
+                rows="3"
+                value={reportDetails}
+                onChange={(e) => setReportDetails(e.target.value)}
+                placeholder="Optional details..."
+                className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 mb-4"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setReportTarget(null)}
+                  className="flex-1 border border-gray-500 rounded-full py-2"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitReport}
+                  disabled={!reportReason}
+                  className="flex-1 bg-coral rounded-full py-2 font-medium disabled:opacity-50"
+                >
+                  Submit Report
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>
