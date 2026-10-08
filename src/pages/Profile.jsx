@@ -35,7 +35,7 @@ function Profile() {
       }
       setUser(user)
 
-      // Ensure a profiles row always exists (prevents the foreign-key error)
+      // Ensure a profiles row always exists (prevents the foreign-key error later)
       await supabase.from('profiles').upsert(
         { id: user.id, updated_at: new Date().toISOString() },
         { onConflict: 'id' }
@@ -84,8 +84,8 @@ function Profile() {
     }
     setMessage('Uploading...')
     try {
-      // CRITICAL FIX: guarantee the profiles row exists before inserting into photos
-      // This solves: insert or update on table "photos" violates foreign key constraint "photos_profile_id_fkey"
+      // CRITICAL FIX for the foreign-key error:
+      // Make sure the profiles row exists BEFORE inserting into photos
       const { error: profileError } = await supabase.from('profiles').upsert(
         {
           id: user.id,
@@ -126,7 +126,7 @@ function Profile() {
     } catch (err) {
       setMessage('Error: ' + err.message)
     }
-    // reset the file input so the same file can be chosen again if needed
+    // Reset file input so the same file can be chosen again if needed
     e.target.value = ''
   }
 
