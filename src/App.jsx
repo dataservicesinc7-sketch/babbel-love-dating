@@ -8,6 +8,7 @@ import Discover from './pages/Discover'
 import Matches from './pages/Matches'
 import Chat from './pages/Chat'
 import Safety from './pages/Safety'
+import ViewProfile from './pages/ViewProfile'
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/profile/:id" element={<ViewProfile />} />
           <Route path="/discover" element={<Discover />} />
           <Route path="/matches" element={<Matches />} />
           <Route path="/chat/:matchId" element={<Chat />} />
