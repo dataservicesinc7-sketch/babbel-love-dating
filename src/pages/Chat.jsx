@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatLastSeen } from '../lib/status'
 
 function Chat() {
   const { matchId } = useParams()
@@ -8,9 +9,17 @@ function Chat() {
   const [messages, setMessages] = useState([])
   const [newMsg, setNewMsg] = useState('')
   const [me, setMe] = useState(null)
-  const [other, setOther] = useState(null) // { id, display_name, photoUrl }
+  const [other, setOther] = useState(null) // { id, display_name, photoUrl, last_seen }
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef(null)
+
+  // Keep our own last_seen fresh while chatting
+  const bumpMyLastSeen = async (userId) => {
+    await supabase.from('profiles').upsert({
+      id: userId,
+      last_seen: new Date().toISOString()
+    }, { onConflict: 'id' })
+  }
 
   useEffect(() => {
     const init = async () => {
@@ -20,8 +29,8 @@ function Chat() {
         return
       }
       setMe(user)
+      await bumpMyLastSeen(user.id)
 
-      // Get the match
       const { data: match } = await supabase
         .from('matches')
         .select('*')
@@ -31,14 +40,12 @@ function Chat() {
       if (match) {
         const otherId = match.profile_a === user.id ? match.profile_b : match.profile_a
 
-        // Other person's profile
         const { data: otherProfile } = await supabase
           .from('profiles')
-          .select('id, display_name, city, date_of_birth')
+          .select('id, display_name, last_seen')
           .eq('id', otherId)
           .maybeSingle()
 
-        // Other person's first photo
         let photoUrl = null
         const { data: photoRows } = await supabase
           .from('photos')
@@ -47,7 +54,7 @@ function Chat() {
           .order('sort_order')
           .limit(1)
 
-        if (photoRows && photoRows.length > 0) {
+        if (photoRows?.[0]) {
           photoUrl = supabase.storage
             .from('profile-photos')
             .getPublicUrl(photoRows[0].storage_path).data.publicUrl
@@ -56,8 +63,8 @@ function Chat() {
         setOther({
           id: otherId,
           display_name: otherProfile?.display_name || 'Someone',
-          city: otherProfile?.city || '',
-          photoUrl
+          photoUrl,
+          last_seen: otherProfile?.last_seen
         })
       }
 
@@ -71,7 +78,7 @@ function Chat() {
     }
     init()
 
-    // Realtime subscription
+    // Realtime messages
     const channel = supabase
       .channel(`chat-${matchId}`)
       .on('postgres_changes', {
@@ -84,8 +91,28 @@ function Chat() {
       })
       .subscribe()
 
+    // Refresh the other person's status every 45 seconds
+    const statusInterval = setInterval(async () => {
+      if (!other?.id) return
+      const { data } = await supabase
+        .from('profiles')
+        .select('last_seen')
+        .eq('id', other.id)
+        .maybeSingle()
+      if (data) {
+        setOther(prev => prev ? { ...prev, last_seen: data.last_seen } : prev)
+      }
+    }, 45000)
+
+    // Keep our own last_seen alive while the chat is open
+    const myInterval = setInterval(() => {
+      if (me?.id) bumpMyLastSeen(me.id)
+    }, 60000)
+
     return () => {
       supabase.removeChannel(channel)
+      clearInterval(statusInterval)
+      clearInterval(myInterval)
     }
   }, [matchId, navigate])
 
@@ -103,6 +130,8 @@ function Chat() {
       sender_id: me.id,
       content
     })
+    // Also bump our last_seen when we send a message
+    await bumpMyLastSeen(me.id)
   }
 
   if (loading) {
@@ -114,17 +143,19 @@ function Chat() {
   }
 
   const otherName = other?.display_name || 'Someone'
+  const statusText = formatLastSeen(other?.last_seen)
+  const isOnline = statusText === 'Online now'
 
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
-      {/* Header with Home button + clickable profile photo/name */}
+      {/* Header */}
       <header className="py-3 px-4 flex items-center justify-between border-b border-gray-700 sticky top-0 bg-navy z-10">
         <div className="flex items-center gap-3">
           <Link to="/matches" className="text-coral text-sm font-medium">← Matches</Link>
           <Link to="/" className="text-sm text-gray-300 hover:text-coral">Home</Link>
         </div>
 
-        {/* Clickable avatar + name → goes to the other user’s profile */}
+        {/* Clickable photo + name → profile */}
         <Link
           to={other?.id ? `/profile/${other.id}` : '#'}
           className="flex items-center gap-2 hover:opacity-90"
@@ -140,10 +171,15 @@ function Chat() {
               {otherName.charAt(0).toUpperCase()}
             </div>
           )}
-          <span className="font-medium text-base">{otherName}</span>
+          <div className="text-left">
+            <span className="font-medium text-base block leading-tight">{otherName}</span>
+            <span className={`text-xs ${isOnline ? 'text-green-400' : 'text-gray-500'}`}>
+              {statusText}
+            </span>
+          </div>
         </Link>
 
-        <div className="w-16"></div> {/* spacer for balance */}
+        <div className="w-16"></div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
