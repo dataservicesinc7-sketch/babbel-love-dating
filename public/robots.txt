@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://babbel-love-dating.pages.dev/sitemap.xml
