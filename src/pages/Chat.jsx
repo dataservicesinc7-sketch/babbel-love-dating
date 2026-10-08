@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { formatLastSeen } from '../lib/status'
 
 function Chat() {
   const { matchId } = useParams()
@@ -9,21 +8,13 @@ function Chat() {
   const [messages, setMessages] = useState([])
   const [newMsg, setNewMsg] = useState('')
   const [me, setMe] = useState(null)
-  const [other, setOther] = useState(null)
+  const [other, setOther] = useState(null) // { id, display_name, photoUrl }
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef(null)
-  const otherIdRef = useRef(null)
 
-  const bumpLastSeen = async (userId) => {
-    if (!userId) return
-    await supabase.from('profiles').upsert({
-      id: userId,
-      last_seen: new Date().toISOString()
-    }, { onConflict: 'id' })
-  }
-
-  const markMessagesAsRead = async (userId) => {
-    // Mark every message sent by the other person as read
+  // Mark all messages from the other person as read
+  const markAsRead = async (userId) => {
+    if (!userId || !matchId) return
     await supabase
       .from('messages')
       .update({ is_read: true })
@@ -33,9 +24,6 @@ function Chat() {
   }
 
   useEffect(() => {
-    let statusInterval
-    let myHeartbeat
-
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -43,84 +31,61 @@ function Chat() {
         return
       }
       setMe(user)
-      await bumpLastSeen(user.id)
 
+      // Get the match
       const { data: match } = await supabase
         .from('matches')
         .select('*')
         .eq('id', matchId)
         .maybeSingle()
 
-      if (!match) {
-        setLoading(false)
-        return
+      if (match) {
+        const otherId = match.profile_a === user.id ? match.profile_b : match.profile_a
+
+        // Other person's profile
+        const { data: otherProfile } = await supabase
+          .from('profiles')
+          .select('id, display_name, city, date_of_birth')
+          .eq('id', otherId)
+          .maybeSingle()
+
+        // Other person's first photo
+        let photoUrl = null
+        const { data: photoRows } = await supabase
+          .from('photos')
+          .select('storage_path')
+          .eq('profile_id', otherId)
+          .order('sort_order')
+          .limit(1)
+
+        if (photoRows && photoRows.length > 0) {
+          photoUrl = supabase.storage
+            .from('profile-photos')
+            .getPublicUrl(photoRows[0].storage_path).data.publicUrl
+        }
+
+        setOther({
+          id: otherId,
+          display_name: otherProfile?.display_name || 'Someone',
+          city: otherProfile?.city || '',
+          photoUrl
+        })
       }
 
-      const otherId = match.profile_a === user.id ? match.profile_b : match.profile_a
-      otherIdRef.current = otherId
-
-      const { data: otherProfile } = await supabase
-        .from('profiles')
-        .select('id, display_name, last_seen')
-        .eq('id', otherId)
-        .maybeSingle()
-
-      let photoUrl = null
-      const { data: photoRows } = await supabase
-        .from('photos')
-        .select('storage_path')
-        .eq('profile_id', otherId)
-        .order('sort_order')
-        .limit(1)
-
-      if (photoRows?.[0]) {
-        photoUrl = supabase.storage
-          .from('profile-photos')
-          .getPublicUrl(photoRows[0].storage_path).data.publicUrl
-      }
-
-      setOther({
-        id: otherId,
-        display_name: otherProfile?.display_name || 'Someone',
-        photoUrl,
-        last_seen: otherProfile?.last_seen
-      })
-
-      // Load messages
       const { data } = await supabase
         .from('messages')
         .select('*')
         .eq('match_id', matchId)
         .order('created_at')
       setMessages(data || [])
-
-      // Mark as read immediately
-      await markMessagesAsRead(user.id)
-
       setLoading(false)
 
-      // Refresh the other person's status every 20 seconds
-      statusInterval = setInterval(async () => {
-        if (!otherIdRef.current) return
-        const { data } = await supabase
-          .from('profiles')
-          .select('last_seen')
-          .eq('id', otherIdRef.current)
-          .maybeSingle()
-        if (data) {
-          setOther(prev => prev ? { ...prev, last_seen: data.last_seen } : prev)
-        }
-      }, 20000)
-
-      // Keep MY last_seen alive every 30 seconds while chat is open
-      myHeartbeat = setInterval(() => {
-        bumpLastSeen(user.id)
-      }, 30000)
+      // Mark everything as read the moment the chat is opened
+      await markAsRead(user.id)
     }
-
     init()
 
-    // Realtime new messages
+    // Realtime subscription
     const channel = supabase
       .channel(`chat-${matchId}`)
       .on('postgres_changes', {
@@ -128,23 +93,17 @@ function Chat() {
         schema: 'public',
         table: 'messages',
         filter: `match_id=eq.${matchId}`
-      }, async (payload) => {
+      }, (payload) => {
         setMessages(prev => [...prev, payload.new])
-        // If the new message is from the other person, mark it read
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user && payload.new.sender_id !== user.id) {
-          await supabase
-            .from('messages')
-            .update({ is_read: true })
-            .eq('id', payload.new.id)
+        // If the new message is from the other person and we are looking at the chat → mark it read
+        if (payload.new.sender_id !== me?.id) {
+          markAsRead(me?.id)
         }
       })
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
-      if (statusInterval) clearInterval(statusInterval)
-      if (myHeartbeat) clearInterval(myHeartbeat)
     }
   }, [matchId, navigate])
 
@@ -163,8 +122,6 @@ function Chat() {
       content,
       is_read: false
     })
-    // Immediately show as online when we send
-    await bumpLastSeen(me.id)
   }
 
   if (loading) {
@@ -176,17 +133,17 @@ function Chat() {
   }
 
   const otherName = other?.display_name || 'Someone'
-  const statusText = formatLastSeen(other?.last_seen)
-  const isOnline = statusText === 'Online now'
 
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
+      {/* Header with Home button + clickable profile photo/name */}
       <header className="py-3 px-4 flex items-center justify-between border-b border-gray-700 sticky top-0 bg-navy z-10">
         <div className="flex items-center gap-3">
           <Link to="/matches" className="text-coral text-sm font-medium">← Matches</Link>
           <Link to="/" className="text-sm text-gray-300 hover:text-coral">Home</Link>
         </div>
 
+        {/* Clickable avatar + name → goes to the other user’s profile */}
         <Link
           to={other?.id ? `/profile/${other.id}` : '#'}
           className="flex items-center gap-2 hover:opacity-90"
@@ -202,15 +159,10 @@ function Chat() {
               {otherName.charAt(0).toUpperCase()}
             </div>
           )}
-          <div className="text-left">
-            <span className="font-medium text-base block leading-tight">{otherName}</span>
-            <span className={`text-xs ${isOnline ? 'text-green-400' : 'text-gray-500'}`}>
-              {statusText}
-            </span>
-          </div>
+          <span className="font-medium text-base">{otherName}</span>
         </Link>
 
-        <div className="w-16"></div>
+        <div className="w-16"></div> {/* spacer for balance */}
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
