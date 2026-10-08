@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatLastSeen } from '../lib/status'
 
 function ageFromDob(dob) {
   if (!dob) return null
@@ -25,6 +26,12 @@ function Discover() {
         return
       }
 
+      // Keep our own last_seen fresh
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        last_seen: new Date().toISOString()
+      }, { onConflict: 'id' })
+
       const { data: myProfile } = await supabase
         .from('profiles')
         .select('*')
@@ -40,7 +47,6 @@ function Discover() {
 
       setMe({ ...user, profile: myProfile })
 
-      // Get blocked users so we hide them
       const { data: blocked } = await supabase
         .from('blocks')
         .select('blocked_id')
@@ -48,10 +54,9 @@ function Discover() {
 
       const blockedIds = (blocked || []).map(b => b.blocked_id)
 
-      // Fetch profiles
       let query = supabase
         .from('profiles')
-        .select('id, display_name, date_of_birth, city, relationship_goal, bio, gender')
+        .select('id, display_name, date_of_birth, city, relationship_goal, bio, gender, last_seen')
         .neq('id', user.id)
         .limit(30)
 
@@ -67,7 +72,6 @@ function Discover() {
         return
       }
 
-      // Faster photo loading – one query for all
       const ids = (others || []).map(p => p.id)
       let photoMap = {}
       if (ids.length > 0) {
@@ -229,6 +233,10 @@ function Discover() {
                   </h2>
                   <p className="text-gray-400 text-sm mt-1">
                     {p.city || '—'} · {p.relationship_goal || '—'}
+                  </p>
+                  {/* ONLINE / LAST SEEN STATUS */}
+                  <p className={`text-sm mt-1 ${formatLastSeen(p.last_seen) === 'Online now' ? 'text-green-400' : 'text-gray-500'}`}>
+                    {formatLastSeen(p.last_seen)}
                   </p>
                   {p.bio && <p className="mt-3 text-gray-200">{p.bio}</p>}
 
