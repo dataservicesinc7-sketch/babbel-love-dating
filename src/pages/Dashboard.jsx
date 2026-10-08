@@ -7,6 +7,7 @@ function Dashboard() {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [photoCount, setPhotoCount] = useState(0)
+  const [unreadTotal, setUnreadTotal] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -17,12 +18,6 @@ function Dashboard() {
         return
       }
       setUser(user)
-
-      // Update last_seen so others can see we are online
-      await supabase.from('profiles').upsert({
-        id: user.id,
-        last_seen: new Date().toISOString()
-      }, { onConflict: 'id' })
 
       const { data: profileData } = await supabase
         .from('profiles')
@@ -35,8 +30,27 @@ function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('profile_id', user.id)
 
+      // Total unread messages across all matches
+      const { data: myMatches } = await supabase
+        .from('matches')
+        .select('id, profile_a, profile_b')
+        .or(`profile_a.eq.${user.id},profile_b.eq.${user.id}`)
+
+      let totalUnread = 0
+      for (const m of myMatches || []) {
+        const otherId = m.profile_a === user.id ? m.profile_b : m.profile_a
+        const { count: c } = await supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('match_id', m.id)
+          .eq('sender_id', otherId)
+          .eq('is_read', false)
+        totalUnread += c || 0
+      }
+
       setProfile(profileData)
       setPhotoCount(count || 0)
+      setUnreadTotal(totalUnread)
       setLoading(false)
     }
 
@@ -66,9 +80,9 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
       <header className="py-6 px-4 flex justify-between items-center max-w-5xl mx-auto w-full">
-        <Link to="/" className="text-2xl md:text-3xl font-bold">
+        <h1 className="text-2xl md:text-3xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
-        </Link>
+        </h1>
         <button
           onClick={handleLogout}
           className="px-5 py-2 bg-coral hover:bg-coral-dark rounded-full text-sm font-medium transition"
@@ -113,9 +127,14 @@ function Dashboard() {
             </Link>
             <Link
               to="/matches"
-              className="border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
+              className="relative border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
             >
               My Matches
+              {unreadTotal > 0 && (
+                <span className="absolute -top-2 -right-2 bg-coral text-white text-xs font-bold rounded-full min-w-[22px] h-5 px-1.5 flex items-center justify-center">
+                  {unreadTotal > 99 ? '99+' : unreadTotal}
+                </span>
+              )}
             </Link>
             <Link
               to="/safety"
