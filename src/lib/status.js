@@ -4,8 +4,8 @@ export function formatLastSeen(lastSeen) {
   const diffMs = Date.now() - new Date(lastSeen).getTime()
   const minutes = Math.floor(diffMs / 60000)
 
-  // Stricter: only “Online now” if seen in the last 3 minutes
-  if (minutes < 3) return 'Online now'
+  // Only “Online now” if seen in the last 2 minutes
+  if (minutes < 2) return 'Online now'
   if (minutes < 60) return `Last seen ${minutes} min ago`
 
   const hours = Math.floor(minutes / 60)
