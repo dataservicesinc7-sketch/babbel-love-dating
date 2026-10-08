@@ -35,6 +35,12 @@ function Profile() {
       }
       setUser(user)
 
+      // Ensure a profiles row always exists (prevents the foreign-key error)
+      await supabase.from('profiles').upsert(
+        { id: user.id, updated_at: new Date().toISOString() },
+        { onConflict: 'id' }
+      )
+
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
       if (data) {
         setDisplayName(data.display_name || '')
@@ -78,6 +84,24 @@ function Profile() {
     }
     setMessage('Uploading...')
     try {
+      // CRITICAL FIX: guarantee the profiles row exists before inserting into photos
+      // This solves: insert or update on table "photos" violates foreign key constraint "photos_profile_id_fkey"
+      const { error: profileError } = await supabase.from('profiles').upsert(
+        {
+          id: user.id,
+          display_name: displayName || null,
+          date_of_birth: dateOfBirth || null,
+          gender: gender || null,
+          looking_for: lookingFor || null,
+          relationship_goal: relationshipGoal || null,
+          city: city || null,
+          bio: bio || null,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'id' }
+      )
+      if (profileError) throw profileError
+
       const compressed = await compressImage(file)
       const path = `${user.id}/${Date.now()}.webp`
       const { error: upError } = await supabase.storage
@@ -98,10 +122,12 @@ function Profile() {
         .eq('profile_id', user.id)
         .order('sort_order')
       setPhotos(photoRows || [])
-      setMessage('Photo added')
+      setMessage('Photo added successfully!')
     } catch (err) {
       setMessage('Error: ' + err.message)
     }
+    // reset the file input so the same file can be chosen again if needed
+    e.target.value = ''
   }
 
   const handleSave = async (e) => {
@@ -158,7 +184,10 @@ function Profile() {
         <Link to="/dashboard" className="text-2xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
         </Link>
-        <Link to="/dashboard" className="text-sm hover:text-coral">Dashboard</Link>
+        <div className="flex gap-4 text-sm">
+          <Link to="/" className="hover:text-coral">Home</Link>
+          <Link to="/dashboard" className="hover:text-coral">Dashboard</Link>
+        </div>
       </header>
 
       <main className="max-w-xl mx-auto px-4 py-6">
