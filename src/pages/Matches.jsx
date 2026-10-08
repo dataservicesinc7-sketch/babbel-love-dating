@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatLastSeen } from '../lib/status'
 
 function ageFromDob(dob) {
   if (!dob) return null
@@ -20,6 +21,12 @@ function Matches() {
         return
       }
 
+      // Keep our own last_seen fresh
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        last_seen: new Date().toISOString()
+      }, { onConflict: 'id' })
+
       const { data } = await supabase
         .from('matches')
         .select('*')
@@ -31,7 +38,7 @@ function Matches() {
 
         const { data: p } = await supabase
           .from('profiles')
-          .select('display_name, city, date_of_birth')
+          .select('display_name, city, date_of_birth, last_seen')
           .eq('id', otherId)
           .maybeSingle()
 
@@ -100,6 +107,9 @@ function Matches() {
                     {ageFromDob(m.other?.date_of_birth) ? `, ${ageFromDob(m.other.date_of_birth)}` : ''}
                   </p>
                   <p className="text-sm text-gray-400">{m.other?.city || ''}</p>
+                  <p className={`text-xs mt-0.5 ${formatLastSeen(m.other?.last_seen) === 'Online now' ? 'text-green-400' : 'text-gray-500'}`}>
+                    {formatLastSeen(m.other?.last_seen)}
+                  </p>
                 </div>
                 <span className="text-coral text-sm">Chat →</span>
               </Link>
