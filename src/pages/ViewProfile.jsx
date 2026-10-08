@@ -24,7 +24,6 @@ function ViewProfile() {
         return
       }
 
-      // Keep our own last_seen fresh
       await supabase.from('profiles').upsert({
         id: user.id,
         last_seen: new Date().toISOString()
@@ -67,7 +66,7 @@ function ViewProfile() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-navy text-white gap-4">
         <p>Profile not found.</p>
-        <Link to="/matches" className="text-coral">Back to Matches</Link>
+        <Link to="/matches" className="text-coral">Back to Messages</Link>
       </div>
     )
   }
@@ -79,13 +78,12 @@ function ViewProfile() {
     <div className="min-h-screen bg-navy text-white pb-12">
       <header className="py-4 px-4 flex justify-between items-center max-w-3xl mx-auto">
         <Link to="/" className="text-sm hover:text-coral">Home</Link>
-        <Link to="/matches" className="text-sm text-coral">← Matches</Link>
+        <Link to="/matches" className="text-sm text-coral">← Messages</Link>
         <Link to="/dashboard" className="text-sm hover:text-coral">Dashboard</Link>
       </header>
 
       <main className="max-w-xl mx-auto px-4">
         <div className="bg-navy-light rounded-2xl p-6">
-          {/* Photos */}
           <div className="flex gap-3 overflow-x-auto mb-5 pb-2">
             {photos.length > 0 ? photos.map(p => (
               <img
@@ -106,7 +104,6 @@ function ViewProfile() {
             {ageFromDob(profile.date_of_birth) ? `, ${ageFromDob(profile.date_of_birth)}` : ''}
           </h1>
 
-          {/* ONLINE / LAST SEEN STATUS */}
           <p className={`text-sm mt-1 font-medium ${isOnline ? 'text-green-400' : 'text-gray-400'}`}>
             {statusText}
           </p>
