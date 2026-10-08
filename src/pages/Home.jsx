@@ -34,7 +34,6 @@ function Home() {
   const [user, setUser] = useState(null)
   const [checking, setChecking] = useState(true)
 
-  // Keep the beautiful auto-slider
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrent((prev) => (prev + 1) % slides.length)
@@ -42,7 +41,6 @@ function Home() {
     return () => clearInterval(timer)
   }, [])
 
-  // Check if user is still logged in (never logs anyone out)
   useEffect(() => {
     const checkUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -62,7 +60,7 @@ function Home() {
 
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
-      {/* FRIENDLY NAVIGATION – now auth-aware */}
+      {/* FRIENDLY NAVIGATION */}
       <header className="sticky top-0 z-50 bg-navy/95 backdrop-blur border-b border-navy-light">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
           <Link to="/" className="text-2xl md:text-3xl font-bold">
@@ -88,7 +86,6 @@ function Home() {
             )}
           </nav>
 
-          {/* Mobile */}
           <div className="flex md:hidden gap-2">
             {checking ? null : user ? (
               <Link to="/dashboard" className="bg-coral px-4 py-1.5 rounded-full text-sm">
