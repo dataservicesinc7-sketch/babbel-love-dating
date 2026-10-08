@@ -8,7 +8,7 @@ function Chat() {
   const [messages, setMessages] = useState([])
   const [newMsg, setNewMsg] = useState('')
   const [me, setMe] = useState(null)
-  const [otherName, setOtherName] = useState('Chat')
+  const [other, setOther] = useState(null) // { id, display_name, photoUrl }
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef(null)
 
@@ -21,7 +21,7 @@ function Chat() {
       }
       setMe(user)
 
-      // Get the match and the other person's name
+      // Get the match
       const { data: match } = await supabase
         .from('matches')
         .select('*')
@@ -30,12 +30,35 @@ function Chat() {
 
       if (match) {
         const otherId = match.profile_a === user.id ? match.profile_b : match.profile_a
+
+        // Other person's profile
         const { data: otherProfile } = await supabase
           .from('profiles')
-          .select('display_name')
+          .select('id, display_name, city, date_of_birth')
           .eq('id', otherId)
           .maybeSingle()
-        setOtherName(otherProfile?.display_name || 'Someone')
+
+        // Other person's first photo
+        let photoUrl = null
+        const { data: photoRows } = await supabase
+          .from('photos')
+          .select('storage_path')
+          .eq('profile_id', otherId)
+          .order('sort_order')
+          .limit(1)
+
+        if (photoRows && photoRows.length > 0) {
+          photoUrl = supabase.storage
+            .from('profile-photos')
+            .getPublicUrl(photoRows[0].storage_path).data.publicUrl
+        }
+
+        setOther({
+          id: otherId,
+          display_name: otherProfile?.display_name || 'Someone',
+          city: otherProfile?.city || '',
+          photoUrl
+        })
       }
 
       const { data } = await supabase
@@ -48,7 +71,7 @@ function Chat() {
     }
     init()
 
-    // Realtime
+    // Realtime subscription
     const channel = supabase
       .channel(`chat-${matchId}`)
       .on('postgres_changes', {
@@ -90,12 +113,37 @@ function Chat() {
     )
   }
 
+  const otherName = other?.display_name || 'Someone'
+
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
-      <header className="py-4 px-4 flex justify-between items-center border-b border-gray-700">
-        <Link to="/matches" className="text-sm text-coral">← Matches</Link>
-        <span className="font-medium text-lg">{otherName}</span>
-        <div className="w-16"></div>
+      {/* Header with Home button + clickable profile photo/name */}
+      <header className="py-3 px-4 flex items-center justify-between border-b border-gray-700 sticky top-0 bg-navy z-10">
+        <div className="flex items-center gap-3">
+          <Link to="/matches" className="text-coral text-sm font-medium">← Matches</Link>
+          <Link to="/" className="text-sm text-gray-300 hover:text-coral">Home</Link>
+        </div>
+
+        {/* Clickable avatar + name → goes to the other user’s profile */}
+        <Link
+          to={other?.id ? `/profile/${other.id}` : '#'}
+          className="flex items-center gap-2 hover:opacity-90"
+        >
+          {other?.photoUrl ? (
+            <img
+              src={other.photoUrl}
+              alt={otherName}
+              className="w-9 h-9 rounded-full object-cover border-2 border-coral"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-navy-light flex items-center justify-center text-sm border border-gray-600">
+              {otherName.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span className="font-medium text-base">{otherName}</span>
+        </Link>
+
+        <div className="w-16"></div> {/* spacer for balance */}
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
