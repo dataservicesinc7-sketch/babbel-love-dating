@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatLastSeen } from '../lib/status'
 
 function ageFromDob(dob) {
   if (!dob) return null
@@ -22,6 +23,12 @@ function ViewProfile() {
         navigate('/login')
         return
       }
+
+      // Keep our own last_seen fresh
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        last_seen: new Date().toISOString()
+      }, { onConflict: 'id' })
 
       const { data } = await supabase
         .from('profiles')
@@ -65,6 +72,9 @@ function ViewProfile() {
     )
   }
 
+  const statusText = formatLastSeen(profile.last_seen)
+  const isOnline = statusText === 'Online now'
+
   return (
     <div className="min-h-screen bg-navy text-white pb-12">
       <header className="py-4 px-4 flex justify-between items-center max-w-3xl mx-auto">
@@ -95,6 +105,12 @@ function ViewProfile() {
             {profile.display_name}
             {ageFromDob(profile.date_of_birth) ? `, ${ageFromDob(profile.date_of_birth)}` : ''}
           </h1>
+
+          {/* ONLINE / LAST SEEN STATUS */}
+          <p className={`text-sm mt-1 font-medium ${isOnline ? 'text-green-400' : 'text-gray-400'}`}>
+            {statusText}
+          </p>
+
           <p className="text-gray-400 mt-1">{profile.city || '—'}</p>
           <p className="mt-2 capitalize text-coral">{profile.relationship_goal?.replace('-', ' ') || ''}</p>
 
