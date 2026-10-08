@@ -101,7 +101,7 @@ function Home() {
         </div>
       </header>
 
-      {/* HERO SLIDER – fully restored */}
+      {/* HERO SLIDER */}
       <section className="relative w-full h-[70vh] md:h-[80vh] overflow-hidden">
         {slides.map((slide, index) => (
           <div
@@ -212,7 +212,10 @@ function Home() {
             Create your free account
           </Link>
         )}
-        <p className="mt-6 text-sm text-gray-400">18+ only · Pilot in Cameroon · Global vision</p>
+        {/* GLOBAL tagline – no more Pilot in Cameroon */}
+        <p className="mt-6 text-sm text-gray-400">
+          Love knows no borders • Built for the world • 18+ only
+        </p>
       </section>
 
       {/* FOOTER */}
