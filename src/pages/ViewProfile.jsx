@@ -90,7 +90,7 @@ function ViewProfile() {
                 key={p.id}
                 src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
                 alt=""
-                className="w-40 h-52 object-cover rounded-xl flex-shrink-0"
+                className={`w-40 h-52 object-cover rounded-xl flex-shrink-0 ${p.sort_order === 0 ? 'ring-2 ring-coral' : ''}`}
               />
             )) : (
               <div className="w-40 h-52 bg-navy rounded-xl flex items-center justify-center text-gray-500">
@@ -108,7 +108,9 @@ function ViewProfile() {
             {statusText}
           </p>
 
-          <p className="text-gray-400 mt-1">{profile.city || '—'}</p>
+          <p className="text-gray-400 mt-1 capitalize">
+            {profile.gender || '—'} · {profile.city || '—'}
+          </p>
           <p className="mt-2 capitalize text-coral">{profile.relationship_goal?.replace('-', ' ') || ''}</p>
 
           {profile.bio && (
