@@ -19,6 +19,12 @@ function Dashboard() {
       }
       setUser(user)
 
+      // Update last_seen so others can see we are online
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        last_seen: new Date().toISOString()
+      }, { onConflict: 'id' })
+
       const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
@@ -30,13 +36,13 @@ function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('profile_id', user.id)
 
-      // Total unread messages across all matches
+      // Calculate total unread messages across all matches
       const { data: myMatches } = await supabase
         .from('matches')
         .select('id, profile_a, profile_b')
         .or(`profile_a.eq.${user.id},profile_b.eq.${user.id}`)
 
-      let totalUnread = 0
+      let total = 0
       for (const m of myMatches || []) {
         const otherId = m.profile_a === user.id ? m.profile_b : m.profile_a
         const { count: c } = await supabase
@@ -45,12 +51,12 @@ function Dashboard() {
           .eq('match_id', m.id)
           .eq('sender_id', otherId)
           .eq('is_read', false)
-        totalUnread += c || 0
+        total += (c || 0)
       }
 
       setProfile(profileData)
       setPhotoCount(count || 0)
-      setUnreadTotal(totalUnread)
+      setUnreadTotal(total)
       setLoading(false)
     }
 
@@ -80,9 +86,9 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
       <header className="py-6 px-4 flex justify-between items-center max-w-5xl mx-auto w-full">
-        <h1 className="text-2xl md:text-3xl font-bold">
+        <Link to="/" className="text-2xl md:text-3xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
-        </h1>
+        </Link>
         <button
           onClick={handleLogout}
           className="px-5 py-2 bg-coral hover:bg-coral-dark rounded-full text-sm font-medium transition"
@@ -125,17 +131,24 @@ function Dashboard() {
             >
               Discover People
             </Link>
+
+            {/* MY MATCHES with clear notification icon + badge */}
             <Link
               to="/matches"
-              className="relative border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
+              className="relative border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full flex items-center justify-center gap-3"
             >
-              My Matches
+              {/* Envelope icon */}
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              My Matches / Messages
               {unreadTotal > 0 && (
-                <span className="absolute -top-2 -right-2 bg-coral text-white text-xs font-bold rounded-full min-w-[22px] h-5 px-1.5 flex items-center justify-center">
+                <span className="absolute -top-2 -right-2 bg-coral text-white text-xs font-bold rounded-full min-w-[22px] h-5 px-1.5 flex items-center justify-center shadow">
                   {unreadTotal > 99 ? '99+' : unreadTotal}
                 </span>
               )}
             </Link>
+
             <Link
               to="/safety"
               className="border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
