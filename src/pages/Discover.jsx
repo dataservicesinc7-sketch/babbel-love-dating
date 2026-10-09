@@ -26,7 +26,6 @@ function Discover() {
         return
       }
 
-      // Keep our own last_seen fresh
       await supabase.from('profiles').upsert({
         id: user.id,
         last_seen: new Date().toISOString()
@@ -47,12 +46,21 @@ function Discover() {
 
       setMe({ ...user, profile: myProfile })
 
-      const { data: blocked } = await supabase
+      // Bidirectional blocks: people I blocked OR people who blocked me
+      const { data: blockedByMe } = await supabase
         .from('blocks')
         .select('blocked_id')
         .eq('blocker_id', user.id)
 
-      const blockedIds = (blocked || []).map(b => b.blocked_id)
+      const { data: blockedMe } = await supabase
+        .from('blocks')
+        .select('blocker_id')
+        .eq('blocked_id', user.id)
+
+      const blockedIds = [
+        ...(blockedByMe || []).map(b => b.blocked_id),
+        ...(blockedMe || []).map(b => b.blocker_id)
+      ]
 
       let query = supabase
         .from('profiles')
@@ -77,7 +85,7 @@ function Discover() {
       if (ids.length > 0) {
         const { data: allPhotos } = await supabase
           .from('photos')
-          .select('profile_id, storage_path')
+          .select('profile_id, storage_path, sort_order')
           .in('profile_id', ids)
           .order('sort_order')
 
@@ -150,7 +158,7 @@ function Discover() {
       setMessage('Error blocking: ' + error.message)
       return
     }
-    setMessage('User blocked')
+    setMessage('User blocked. They can no longer see or message you.')
     setProfiles(prev => prev.filter(p => p.id !== otherId))
   }
 
@@ -231,10 +239,9 @@ function Discover() {
                     {p.display_name}
                     {ageFromDob(p.date_of_birth) ? `, ${ageFromDob(p.date_of_birth)}` : ''}
                   </h2>
-                  <p className="text-gray-400 text-sm mt-1">
-                    {p.city || '—'} · {p.relationship_goal || '—'}
+                  <p className="text-gray-400 text-sm mt-1 capitalize">
+                    {p.gender || '—'} · {p.city || '—'} · {p.relationship_goal || '—'}
                   </p>
-                  {/* ONLINE / LAST SEEN STATUS */}
                   <p className={`text-sm mt-1 ${formatLastSeen(p.last_seen) === 'Online now' ? 'text-green-400' : 'text-gray-500'}`}>
                     {formatLastSeen(p.last_seen)}
                   </p>
@@ -275,7 +282,6 @@ function Discover() {
           </div>
         )}
 
-        {/* Report Modal */}
         {reportTarget && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
             <div className="bg-navy-light p-6 rounded-2xl max-w-md w-full">
