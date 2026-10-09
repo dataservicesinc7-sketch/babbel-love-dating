@@ -9,6 +9,7 @@ import Matches from './pages/Matches'
 import Chat from './pages/Chat'
 import Safety from './pages/Safety'
 import ViewProfile from './pages/ViewProfile'
+import Blocked from './pages/Blocked'
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
           <Route path="/matches" element={<Matches />} />
           <Route path="/chat/:matchId" element={<Chat />} />
           <Route path="/safety" element={<Safety />} />
+          <Route path="/blocked" element={<Blocked />} />
         </Routes>
       </div>
     </BrowserRouter>
