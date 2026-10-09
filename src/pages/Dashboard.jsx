@@ -7,6 +7,7 @@ function Dashboard() {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [photoCount, setPhotoCount] = useState(0)
+  const [primaryPhoto, setPrimaryPhoto] = useState(null)
   const [unreadTotal, setUnreadTotal] = useState(0)
   const [loading, setLoading] = useState(true)
 
@@ -19,12 +20,6 @@ function Dashboard() {
       }
       setUser(user)
 
-      // Update last_seen so others can see we are online
-      await supabase.from('profiles').upsert({
-        id: user.id,
-        last_seen: new Date().toISOString()
-      }, { onConflict: 'id' })
-
       const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
@@ -36,13 +31,26 @@ function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('profile_id', user.id)
 
-      // Calculate total unread messages across all matches
+      // Primary photo (lowest sort_order)
+      const { data: photoRows } = await supabase
+        .from('photos')
+        .select('storage_path')
+        .eq('profile_id', user.id)
+        .order('sort_order')
+        .limit(1)
+
+      if (photoRows && photoRows.length > 0) {
+        setPrimaryPhoto(
+          supabase.storage.from('profile-photos').getPublicUrl(photoRows[0].storage_path).data.publicUrl
+        )
+      }
+
       const { data: myMatches } = await supabase
         .from('matches')
         .select('id, profile_a, profile_b')
         .or(`profile_a.eq.${user.id},profile_b.eq.${user.id}`)
 
-      let total = 0
+      let totalUnread = 0
       for (const m of myMatches || []) {
         const otherId = m.profile_a === user.id ? m.profile_b : m.profile_a
         const { count: c } = await supabase
@@ -51,12 +59,12 @@ function Dashboard() {
           .eq('match_id', m.id)
           .eq('sender_id', otherId)
           .eq('is_read', false)
-        total += (c || 0)
+        totalUnread += c || 0
       }
 
       setProfile(profileData)
       setPhotoCount(count || 0)
-      setUnreadTotal(total)
+      setUnreadTotal(totalUnread)
       setLoading(false)
     }
 
@@ -86,9 +94,9 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
       <header className="py-6 px-4 flex justify-between items-center max-w-5xl mx-auto w-full">
-        <Link to="/" className="text-2xl md:text-3xl font-bold">
+        <h1 className="text-2xl md:text-3xl font-bold">
           <span className="text-coral">Babbel</span> Love Dating
-        </Link>
+        </h1>
         <button
           onClick={handleLogout}
           className="px-5 py-2 bg-coral hover:bg-coral-dark rounded-full text-sm font-medium transition"
@@ -99,6 +107,13 @@ function Dashboard() {
 
       <main className="flex-1 flex flex-col items-center justify-center px-4 text-center pb-12">
         <div className="max-w-xl w-full">
+          {primaryPhoto && (
+            <img
+              src={primaryPhoto}
+              alt="Your profile"
+              className="w-24 h-24 rounded-full object-cover mx-auto mb-4 border-4 border-coral"
+            />
+          )}
           <h2 className="text-3xl md:text-4xl font-semibold mb-2">
             Welcome{profile?.display_name ? `, ${profile.display_name}` : ''}!
           </h2>
@@ -106,6 +121,7 @@ function Dashboard() {
 
           <div className="bg-navy-light rounded-2xl p-6 text-left mb-8 space-y-2">
             <p><span className="text-gray-400">City:</span> {profile?.city || '—'}</p>
+            <p><span className="text-gray-400">Gender:</span> <span className="capitalize">{profile?.gender || '—'}</span></p>
             <p><span className="text-gray-400">Goal:</span> {profile?.relationship_goal || '—'}</p>
             <p><span className="text-gray-400">Photos:</span> {photoCount}</p>
             <p>
@@ -131,24 +147,17 @@ function Dashboard() {
             >
               Discover People
             </Link>
-
-            {/* MY MATCHES with clear notification icon + badge */}
             <Link
               to="/matches"
-              className="relative border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full flex items-center justify-center gap-3"
+              className="relative border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
             >
-              {/* Envelope icon */}
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              My Matches / Messages
+              My Matches
               {unreadTotal > 0 && (
-                <span className="absolute -top-2 -right-2 bg-coral text-white text-xs font-bold rounded-full min-w-[22px] h-5 px-1.5 flex items-center justify-center shadow">
+                <span className="absolute -top-2 -right-2 bg-coral text-white text-xs font-bold rounded-full min-w-[22px] h-5 px-1.5 flex items-center justify-center">
                   {unreadTotal > 99 ? '99+' : unreadTotal}
                 </span>
               )}
             </Link>
-
             <Link
               to="/safety"
               className="border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
