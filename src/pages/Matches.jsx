@@ -20,6 +20,22 @@ function Matches() {
         return
       }
 
+      // Bidirectional blocks
+      const { data: blockedByMe } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', user.id)
+
+      const { data: blockedMe } = await supabase
+        .from('blocks')
+        .select('blocker_id')
+        .eq('blocked_id', user.id)
+
+      const blockedIds = new Set([
+        ...(blockedByMe || []).map(b => b.blocked_id),
+        ...(blockedMe || []).map(b => b.blocker_id)
+      ])
+
       const { data } = await supabase
         .from('matches')
         .select('*')
@@ -29,9 +45,12 @@ function Matches() {
       for (const m of data || []) {
         const otherId = m.profile_a === user.id ? m.profile_b : m.profile_a
 
+        // Skip blocked matches
+        if (blockedIds.has(otherId)) continue
+
         const { data: p } = await supabase
           .from('profiles')
-          .select('display_name, city, date_of_birth')
+          .select('display_name, city, date_of_birth, gender')
           .eq('id', otherId)
           .maybeSingle()
 
@@ -46,7 +65,6 @@ function Matches() {
           ? supabase.storage.from('profile-photos').getPublicUrl(photoRows[0].storage_path).data.publicUrl
           : null
 
-        // Count unread messages from the other person
         const { count: unreadCount } = await supabase
           .from('messages')
           .select('*', { count: 'exact', head: true })
@@ -113,10 +131,11 @@ function Matches() {
                     {m.other?.display_name || 'Someone'}
                     {ageFromDob(m.other?.date_of_birth) ? `, ${ageFromDob(m.other.date_of_birth)}` : ''}
                   </p>
-                  <p className="text-sm text-gray-400">{m.other?.city || ''}</p>
+                  <p className="text-sm text-gray-400 capitalize">
+                    {m.other?.gender || '—'} · {m.other?.city || ''}
+                  </p>
                 </div>
 
-                {/* Unread badge */}
                 {m.unread > 0 && (
                   <span className="absolute top-3 right-3 bg-coral text-white text-xs font-bold rounded-full min-w-[22px] h-5.5 px-1.5 flex items-center justify-center">
                     {m.unread > 99 ? '99+' : m.unread}
