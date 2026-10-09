@@ -35,7 +35,6 @@ function Profile() {
       }
       setUser(user)
 
-      // Ensure a profiles row always exists (prevents the foreign-key error later)
       await supabase.from('profiles').upsert(
         { id: user.id, updated_at: new Date().toISOString() },
         { onConflict: 'id' }
@@ -52,11 +51,14 @@ function Profile() {
         setBio(data.bio || '')
       }
 
+      // Always load previously saved interests – never force re-selection
       const { data: interestRows } = await supabase
         .from('profile_interests')
         .select('interest')
         .eq('profile_id', user.id)
-      if (interestRows) setSelectedInterests(interestRows.map(r => r.interest))
+      if (interestRows && interestRows.length > 0) {
+        setSelectedInterests(interestRows.map(r => r.interest))
+      }
 
       const { data: photoRows } = await supabase
         .from('photos')
@@ -84,8 +86,6 @@ function Profile() {
     }
     setMessage('Uploading...')
     try {
-      // CRITICAL FIX for the foreign-key error:
-      // Make sure the profiles row exists BEFORE inserting into photos
       const { error: profileError } = await supabase.from('profiles').upsert(
         {
           id: user.id,
@@ -109,10 +109,13 @@ function Profile() {
         .upload(path, compressed)
       if (upError) throw upError
 
+      // New photo gets next sort_order; if first photo, it becomes primary (0)
+      const nextOrder = photos.length === 0 ? 0 : Math.max(...photos.map(p => p.sort_order || 0)) + 1
+
       const { error: dbError } = await supabase.from('photos').insert({
         profile_id: user.id,
         storage_path: path,
-        sort_order: photos.length
+        sort_order: nextOrder
       })
       if (dbError) throw dbError
 
@@ -126,8 +129,47 @@ function Profile() {
     } catch (err) {
       setMessage('Error: ' + err.message)
     }
-    // Reset file input so the same file can be chosen again if needed
     e.target.value = ''
+  }
+
+  const setAsPrimary = async (photoId) => {
+    if (!user) return
+    setMessage('Setting primary photo...')
+    try {
+      // Move chosen photo to sort_order 0, shift others up
+      const target = photos.find(p => p.id === photoId)
+      if (!target) return
+
+      // First set all to temporary high numbers to avoid unique conflicts
+      for (let i = 0; i < photos.length; i++) {
+        await supabase.from('photos')
+          .update({ sort_order: 1000 + i })
+          .eq('id', photos[i].id)
+      }
+
+      // Set primary to 0
+      await supabase.from('photos')
+        .update({ sort_order: 0 })
+        .eq('id', photoId)
+
+      // Re-order the rest starting from 1
+      const others = photos.filter(p => p.id !== photoId)
+      for (let i = 0; i < others.length; i++) {
+        await supabase.from('photos')
+          .update({ sort_order: i + 1 })
+          .eq('id', others[i].id)
+      }
+
+      const { data: photoRows } = await supabase
+        .from('photos')
+        .select('*')
+        .eq('profile_id', user.id)
+        .order('sort_order')
+      setPhotos(photoRows || [])
+      setMessage('Primary photo updated!')
+    } catch (err) {
+      setMessage('Error: ' + err.message)
+    }
   }
 
   const handleSave = async (e) => {
@@ -158,7 +200,7 @@ function Profile() {
       return
     }
 
-    // Replace interests
+    // Only replace interests if they actually changed (keeps saved ones intact)
     await supabase.from('profile_interests').delete().eq('profile_id', user.id)
     if (selectedInterests.length) {
       await supabase.from('profile_interests').insert(
@@ -258,6 +300,7 @@ function Profile() {
 
           <div>
             <label className="block text-sm mb-2">Interests (choose at least 3) *</label>
+            <p className="text-xs text-gray-400 mb-2">Your previously saved interests are already selected.</p>
             <div className="flex flex-wrap gap-2">
               {INTEREST_OPTIONS.map(item => (
                 <button type="button" key={item} onClick={() => toggleInterest(item)}
@@ -269,12 +312,27 @@ function Profile() {
           </div>
 
           <div>
-            <label className="block text-sm mb-2">Photos (up to 6)</label>
+            <label className="block text-sm mb-2">Photos (up to 6) – first / primary photo is used everywhere</label>
             <div className="flex flex-wrap gap-3 mb-3">
               {photos.map(p => (
-                <img key={p.id}
-                  src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
-                  alt="" className="w-20 h-20 object-cover rounded-lg" />
+                <div key={p.id} className="relative">
+                  <img
+                    src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
+                    alt=""
+                    className={`w-20 h-20 object-cover rounded-lg ${p.sort_order === 0 ? 'ring-2 ring-coral' : ''}`}
+                  />
+                  {p.sort_order === 0 ? (
+                    <span className="absolute -top-2 -right-2 bg-coral text-xs px-1.5 py-0.5 rounded-full">Main</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setAsPrimary(p.id)}
+                      className="absolute -bottom-2 left-0 right-0 text-[10px] bg-navy/90 text-coral rounded"
+                    >
+                      Set main
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
             {photos.length < 6 && (
