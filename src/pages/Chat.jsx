@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { compressImage } from '../lib/image'
 
 function Chat() {
   const { matchId } = useParams()
@@ -11,8 +12,13 @@ function Chat() {
   const [other, setOther] = useState(null)
   const [loading, setLoading] = useState(true)
   const [blocked, setBlocked] = useState(false)
+  const [iAmBlocker, setIAmBlocker] = useState(false)
   const [blockMessage, setBlockMessage] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [mediaRecorder, setMediaRecorder] = useState(null)
   const bottomRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   const markAsRead = async (userId) => {
     if (!userId || !matchId) return
@@ -24,7 +30,6 @@ function Chat() {
       .eq('is_read', false)
   }
 
-  // Group messages by date for clear date headers
   const groupMessagesByDate = (msgs) => {
     const groups = []
     let currentDate = null
@@ -40,10 +45,7 @@ function Chat() {
       else if (dateKey === yesterday) label = 'Yesterday'
       else {
         label = d.toLocaleDateString(undefined, {
-          weekday: 'short',
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
+          weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
         })
       }
 
@@ -79,19 +81,20 @@ function Chat() {
 
       const otherId = match.profile_a === user.id ? match.profile_b : match.profile_a
 
-      // Check blocks both ways
+      // Bidirectional block check
       const { data: blockCheck } = await supabase
         .from('blocks')
         .select('*')
         .or(`and(blocker_id.eq.${user.id},blocked_id.eq.${otherId}),and(blocker_id.eq.${otherId},blocked_id.eq.${user.id})`)
 
       if (blockCheck && blockCheck.length > 0) {
-        const iAmBlocker = blockCheck.some(b => b.blocker_id === user.id)
+        const amIBlocker = blockCheck.some(b => b.blocker_id === user.id)
         setBlocked(true)
+        setIAmBlocker(amIBlocker)
         setBlockMessage(
-          iAmBlocker
-            ? 'You blocked this person. You cannot send messages.'
-            : 'You have been blocked by this person. You cannot send or receive messages.'
+          amIBlocker
+            ? 'You blocked this person. Unblock them to chat again.'
+            : 'You have been blocked by this person. You cannot send messages.'
         )
       }
 
@@ -109,7 +112,7 @@ function Chat() {
         .order('sort_order')
         .limit(1)
 
-      if (photoRows && photoRows.length > 0) {
+      if (photoRows?.[0]) {
         photoUrl = supabase.storage
           .from('profile-photos')
           .getPublicUrl(photoRows[0].storage_path).data.publicUrl
@@ -130,7 +133,6 @@ function Chat() {
         .order('created_at')
       setMessages(data || [])
       setLoading(false)
-
       await markAsRead(user.id)
     }
     init()
@@ -150,16 +152,14 @@ function Chat() {
       })
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => supabase.removeChannel(channel)
   }, [matchId, navigate])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const send = async (e) => {
+  const sendText = async (e) => {
     e.preventDefault()
     if (!newMsg.trim() || !me || blocked) return
     const content = newMsg.trim()
@@ -168,8 +168,109 @@ function Chat() {
       match_id: matchId,
       sender_id: me.id,
       content,
+      message_type: 'text',
       is_read: false
     })
+  }
+
+  const uploadAndSendMedia = async (file, type, fileName) => {
+    if (!me || blocked || !file) return
+    setUploading(true)
+    try {
+      let finalFile = file
+      if (type === 'image') {
+        finalFile = await compressImage(file, 800, 0.7)
+      }
+
+      // Size limits for free tier
+      if (finalFile.size > 4 * 1024 * 1024) {
+        alert('File too large (max ~4 MB). Please choose a smaller file.')
+        setUploading(false)
+        return
+      }
+
+      const ext = finalFile.name.split('.').pop() || (type === 'audio' ? 'webm' : 'bin')
+      const path = `${matchId}/${me.id}/${Date.now()}.${ext}`
+
+      const { error: upError } = await supabase.storage
+        .from('chat-media')
+        .upload(path, finalFile, { contentType: finalFile.type })
+
+      if (upError) throw upError
+
+      await supabase.from('messages').insert({
+        match_id: matchId,
+        sender_id: me.id,
+        content: type === 'image' ? '📷 Photo' : type === 'audio' ? '🎤 Voice note' : `📎 ${fileName || 'File'}`,
+        message_type: type,
+        media_path: path,
+        file_name: fileName || finalFile.name,
+        mime_type: finalFile.type,
+        is_read: false
+      })
+    } catch (err) {
+      alert('Upload failed: ' + err.message)
+    }
+    setUploading(false)
+  }
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    let type = 'file'
+    if (file.type.startsWith('image/')) type = 'image'
+    else if (file.type.startsWith('audio/')) type = 'audio'
+
+    uploadAndSendMedia(file, type, file.name)
+    e.target.value = ''
+  }
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      const chunks = []
+
+      recorder.ondataavailable = (e) => chunks.push(e.data)
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
+        uploadAndSendMedia(file, 'audio', 'Voice note')
+        stream.getTracks().forEach(t => t.stop())
+      }
+
+      recorder.start()
+      setMediaRecorder(recorder)
+      setRecording(true)
+    } catch (err) {
+      alert('Microphone access denied or not available.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorder && recording) {
+      mediaRecorder.stop()
+      setRecording(false)
+      setMediaRecorder(null)
+    }
+  }
+
+  const unblockHere = async () => {
+    if (!me || !other) return
+    const { error } = await supabase
+      .from('blocks')
+      .delete()
+      .eq('blocker_id', me.id)
+      .eq('blocked_id', other.id)
+    if (error) {
+      alert('Error unblocking: ' + error.message)
+      return
+    }
+    setBlocked(false)
+    setIAmBlocker(false)
+    setBlockMessage('')
+    alert('Unblocked. You can now message again.')
   }
 
   if (loading) {
@@ -196,11 +297,7 @@ function Chat() {
           className="flex items-center gap-2 hover:opacity-90"
         >
           {other?.photoUrl ? (
-            <img
-              src={other.photoUrl}
-              alt={otherName}
-              className="w-9 h-9 rounded-full object-cover border-2 border-coral"
-            />
+            <img src={other.photoUrl} alt={otherName} className="w-9 h-9 rounded-full object-cover border-2 border-coral" />
           ) : (
             <div className="w-9 h-9 rounded-full bg-navy-light flex items-center justify-center text-sm border border-gray-600">
               {otherName.charAt(0).toUpperCase()}
@@ -208,9 +305,7 @@ function Chat() {
           )}
           <div className="text-left">
             <span className="font-medium text-base block">{otherName}</span>
-            {other?.gender && (
-              <span className="text-xs text-gray-400 capitalize">{other.gender}</span>
-            )}
+            {other?.gender && <span className="text-xs text-gray-400 capitalize">{other.gender}</span>}
           </div>
         </Link>
 
@@ -220,6 +315,11 @@ function Chat() {
       {blocked && (
         <div className="bg-red-900/40 border-b border-red-700 text-center py-3 px-4 text-sm">
           {blockMessage}
+          {iAmBlocker && (
+            <button onClick={unblockHere} className="ml-3 underline text-coral">
+              Unblock now
+            </button>
+          )}
         </div>
       )}
 
@@ -237,15 +337,38 @@ function Chat() {
             </div>
             {group.messages.map((m) => {
               const isMe = m.sender_id === me?.id
+              const mediaUrl = m.media_path
+                ? supabase.storage.from('chat-media').getPublicUrl(m.media_path).data.publicUrl
+                : null
+
               return (
                 <div
                   key={m.id}
                   className={`max-w-[80%] p-3 rounded-2xl mb-2 ${isMe ? 'ml-auto bg-coral' : 'bg-navy-light'}`}
                 >
-                  <p className="text-xs opacity-70 mb-1">
-                    {isMe ? 'You' : otherName}
-                  </p>
-                  <p>{m.content}</p>
+                  <p className="text-xs opacity-70 mb-1">{isMe ? 'You' : otherName}</p>
+
+                  {m.message_type === 'image' && mediaUrl && (
+                    <img src={mediaUrl} alt="Shared photo" className="rounded-lg max-w-full max-h-64 object-contain mb-1" />
+                  )}
+
+                  {m.message_type === 'audio' && mediaUrl && (
+                    <audio controls src={mediaUrl} className="w-full max-w-xs" />
+                  )}
+
+                  {m.message_type === 'file' && mediaUrl && (
+                    <a
+                      href={mediaUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-sm break-all"
+                    >
+                      📎 {m.file_name || 'Download file'}
+                    </a>
+                  )}
+
+                  {(m.message_type === 'text' || !m.message_type) && <p>{m.content}</p>}
+
                   <p className="text-xs opacity-60 mt-1">
                     {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </p>
@@ -257,22 +380,70 @@ function Chat() {
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={send} className="p-4 border-t border-gray-700 flex gap-2">
-        <input
-          value={newMsg}
-          onChange={e => setNewMsg(e.target.value)}
-          placeholder={blocked ? 'Messaging is disabled' : `Message ${otherName}...`}
-          disabled={blocked}
-          className="flex-1 px-4 py-3 rounded-full bg-navy-light border border-gray-600 focus:outline-none focus:border-coral disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={blocked}
-          className="bg-coral px-5 rounded-full font-medium disabled:opacity-50"
-        >
-          Send
-        </button>
-      </form>
+      {/* Input area */}
+      <div className="p-3 border-t border-gray-700">
+        {uploading && <p className="text-center text-xs text-coral mb-2">Uploading...</p>}
+        {recording && (
+          <p className="text-center text-xs text-red-400 mb-2 animate-pulse">Recording... tap stop when finished</p>
+        )}
+
+        <form onSubmit={sendText} className="flex gap-2 items-center">
+          {/* Attachment button */}
+          <button
+            type="button"
+            disabled={blocked || uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 rounded-full border border-gray-600 disabled:opacity-40"
+            title="Send photo or document"
+          >
+            📎
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,audio/*,.pdf,.doc,.docx,.txt"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+
+          {/* Voice note button */}
+          {!recording ? (
+            <button
+              type="button"
+              disabled={blocked || uploading}
+              onClick={startRecording}
+              className="p-2 rounded-full border border-gray-600 disabled:opacity-40"
+              title="Record voice note"
+            >
+              🎤
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="p-2 rounded-full bg-red-600 text-white"
+              title="Stop recording"
+            >
+              ⏹
+            </button>
+          )}
+
+          <input
+            value={newMsg}
+            onChange={e => setNewMsg(e.target.value)}
+            placeholder={blocked ? 'Messaging disabled' : `Message ${otherName}...`}
+            disabled={blocked || uploading}
+            className="flex-1 px-4 py-3 rounded-full bg-navy-light border border-gray-600 focus:outline-none focus:border-coral disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={blocked || uploading}
+            className="bg-coral px-5 py-3 rounded-full font-medium disabled:opacity-50"
+          >
+            Send
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
