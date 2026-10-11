@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatLocation } from '../lib/locations'
 
 function Dashboard() {
   const navigate = useNavigate()
@@ -124,7 +125,7 @@ function Dashboard() {
           <p className="text-gray-300 mb-6">{user?.email}</p>
 
           <div className="bg-navy-light rounded-2xl p-6 text-left mb-8 space-y-2">
-            <p><span className="text-gray-400">City:</span> {profile?.city || '—'}</p>
+            <p><span className="text-gray-400">Location:</span> {formatLocation(profile?.city, profile?.country)}</p>
             <p><span className="text-gray-400">Gender:</span> <span className="capitalize">{profile?.gender || '—'}</span></p>
             <p><span className="text-gray-400">Goal:</span> {profile?.relationship_goal || '—'}</p>
             <p><span className="text-gray-400">Photos:</span> {photoCount}</p>
@@ -176,6 +177,13 @@ function Dashboard() {
               className="border border-gray-500 hover:border-coral transition font-medium py-3 px-8 rounded-full"
             >
               Safety Center
+            </Link>
+            {/* Admin link – only visible to you later; for now always shown so you can reach it */}
+            <Link
+              to="/admin"
+              className="border border-yellow-600 text-yellow-400 hover:bg-yellow-900/30 transition font-medium py-3 px-8 rounded-full"
+            >
+              Admin Panel
             </Link>
           </div>
         </div>
