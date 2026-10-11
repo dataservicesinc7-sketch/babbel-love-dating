@@ -10,6 +10,7 @@ import Chat from './pages/Chat'
 import Safety from './pages/Safety'
 import ViewProfile from './pages/ViewProfile'
 import Blocked from './pages/Blocked'
+import Admin from './pages/Admin'
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="/chat/:matchId" element={<Chat />} />
           <Route path="/safety" element={<Safety />} />
           <Route path="/blocked" element={<Blocked />} />
+          <Route path="/admin" element={<Admin />} />
         </Routes>
       </div>
     </BrowserRouter>
