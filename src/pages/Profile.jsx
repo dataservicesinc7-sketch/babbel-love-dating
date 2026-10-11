@@ -226,7 +226,7 @@ function Profile() {
   }
 
   const cities = getCitiesForCountry(country)
-  const showCustomCity = city === '__custom__' || (city && !cities.includes(city) && country)
+  const showCustomCity = city === '__custom__' || (city && country && !cities.includes(city))
 
   return (
     <div className="min-h-screen bg-navy text-white pb-12">
@@ -293,7 +293,7 @@ function Profile() {
             </select>
           </div>
 
-          {/* NEW: Country + City */}
+          {/* Country + City */}
           <div>
             <label className="block text-sm mb-1">Country *</label>
             <select
