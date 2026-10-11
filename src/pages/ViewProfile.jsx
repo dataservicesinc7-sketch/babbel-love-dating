@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatLastSeen } from '../lib/status'
+import { formatLocation } from '../lib/locations'
 
 function ageFromDob(dob) {
   if (!dob) return null
@@ -109,7 +110,7 @@ function ViewProfile() {
           </p>
 
           <p className="text-gray-400 mt-1 capitalize">
-            {profile.gender || '—'} · {profile.city || '—'}
+            {profile.gender || '—'} · {formatLocation(profile.city, profile.country)}
           </p>
           <p className="mt-2 capitalize text-coral">{profile.relationship_goal?.replace('-', ' ') || ''}</p>
 
@@ -122,7 +123,7 @@ function ViewProfile() {
               <h3 className="text-sm text-gray-400 mb-2">Interests</h3>
               <div className="flex flex-wrap gap-2">
                 {interests.map(i => (
-                  <span key={i} className="px-3 py-1 rounded-full bg-navy text-sm border border-gray-600">
+                  <span key={i} className="px-3 py-1 rounded-full text-sm bg-navy border border-gray-600">
                     {i}
                   </span>
                 ))}
