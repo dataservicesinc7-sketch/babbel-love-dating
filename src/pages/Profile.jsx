@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { compressImage } from '../lib/image'
+import { COUNTRIES, getCitiesForCountry } from '../lib/locations'
 
 const INTEREST_OPTIONS = [
   'Cooking', 'Street food', 'Coffee', 'Football', 'Running', 'Gym', 'Hiking', 'Dancing',
@@ -22,7 +23,9 @@ function Profile() {
   const [gender, setGender] = useState('')
   const [lookingFor, setLookingFor] = useState('')
   const [relationshipGoal, setRelationshipGoal] = useState('')
+  const [country, setCountry] = useState('')
   const [city, setCity] = useState('')
+  const [customCity, setCustomCity] = useState('')
   const [bio, setBio] = useState('')
   const [selectedInterests, setSelectedInterests] = useState([])
 
@@ -47,11 +50,11 @@ function Profile() {
         setGender(data.gender || '')
         setLookingFor(data.looking_for || '')
         setRelationshipGoal(data.relationship_goal || '')
+        setCountry(data.country || '')
         setCity(data.city || '')
         setBio(data.bio || '')
       }
 
-      // Always load previously saved interests – never force re-selection
       const { data: interestRows } = await supabase
         .from('profile_interests')
         .select('interest')
@@ -86,6 +89,7 @@ function Profile() {
     }
     setMessage('Uploading...')
     try {
+      const finalCity = city === '__custom__' ? customCity.trim() : city
       const { error: profileError } = await supabase.from('profiles').upsert(
         {
           id: user.id,
@@ -94,7 +98,8 @@ function Profile() {
           gender: gender || null,
           looking_for: lookingFor || null,
           relationship_goal: relationshipGoal || null,
-          city: city || null,
+          country: country || null,
+          city: finalCity || null,
           bio: bio || null,
           updated_at: new Date().toISOString()
         },
@@ -109,7 +114,6 @@ function Profile() {
         .upload(path, compressed)
       if (upError) throw upError
 
-      // New photo gets next sort_order; if first photo, it becomes primary (0)
       const nextOrder = photos.length === 0 ? 0 : Math.max(...photos.map(p => p.sort_order || 0)) + 1
 
       const { error: dbError } = await supabase.from('photos').insert({
@@ -136,23 +140,19 @@ function Profile() {
     if (!user) return
     setMessage('Setting primary photo...')
     try {
-      // Move chosen photo to sort_order 0, shift others up
       const target = photos.find(p => p.id === photoId)
       if (!target) return
 
-      // First set all to temporary high numbers to avoid unique conflicts
       for (let i = 0; i < photos.length; i++) {
         await supabase.from('photos')
           .update({ sort_order: 1000 + i })
           .eq('id', photos[i].id)
       }
 
-      // Set primary to 0
       await supabase.from('photos')
         .update({ sort_order: 0 })
         .eq('id', photoId)
 
-      // Re-order the rest starting from 1
       const others = photos.filter(p => p.id !== photoId)
       for (let i = 0; i < others.length; i++) {
         await supabase.from('photos')
@@ -178,6 +178,11 @@ function Profile() {
       setMessage('Please select at least 3 interests')
       return
     }
+    const finalCity = city === '__custom__' ? customCity.trim() : city
+    if (!finalCity) {
+      setMessage('Please select or enter a city')
+      return
+    }
     setSaving(true)
     setMessage('')
 
@@ -188,7 +193,8 @@ function Profile() {
       gender,
       looking_for: lookingFor,
       relationship_goal: relationshipGoal,
-      city,
+      country: country || null,
+      city: finalCity,
       bio,
       updated_at: new Date().toISOString()
     }
@@ -200,7 +206,6 @@ function Profile() {
       return
     }
 
-    // Only replace interests if they actually changed (keeps saved ones intact)
     await supabase.from('profile_interests').delete().eq('profile_id', user.id)
     if (selectedInterests.length) {
       await supabase.from('profile_interests').insert(
@@ -219,6 +224,9 @@ function Profile() {
       </div>
     )
   }
+
+  const cities = getCitiesForCountry(country)
+  const showCustomCity = city === '__custom__' || (city && !cities.includes(city) && country)
 
   return (
     <div className="min-h-screen bg-navy text-white pb-12">
@@ -285,11 +293,70 @@ function Profile() {
             </select>
           </div>
 
+          {/* NEW: Country + City */}
+          <div>
+            <label className="block text-sm mb-1">Country *</label>
+            <select
+              required
+              value={country}
+              onChange={e => {
+                setCountry(e.target.value)
+                setCity('')
+                setCustomCity('')
+              }}
+              className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
+            >
+              <option value="">Select country...</option>
+              {COUNTRIES.map(c => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className="block text-sm mb-1">City *</label>
-            <input type="text" required value={city} onChange={e => setCity(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
-              placeholder="e.g. Douala, Buea" />
+            {country && cities.length > 0 ? (
+              <>
+                <select
+                  required
+                  value={showCustomCity ? '__custom__' : city}
+                  onChange={e => {
+                    if (e.target.value === '__custom__') {
+                      setCity('__custom__')
+                    } else {
+                      setCity(e.target.value)
+                      setCustomCity('')
+                    }
+                  }}
+                  className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
+                >
+                  <option value="">Select city...</option>
+                  {cities.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  <option value="__custom__">Other city (type below)</option>
+                </select>
+                {showCustomCity && (
+                  <input
+                    type="text"
+                    required
+                    value={customCity}
+                    onChange={e => setCustomCity(e.target.value)}
+                    placeholder="Type your city"
+                    className="w-full mt-2 px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
+                  />
+                )}
+              </>
+            ) : (
+              <input
+                type="text"
+                required
+                value={city}
+                onChange={e => setCity(e.target.value)}
+                placeholder="e.g. Douala or your city"
+                className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
+              />
+            )}
           </div>
 
           <div>
@@ -342,13 +409,16 @@ function Profile() {
           </div>
 
           {message && (
-            <p className={`text-sm ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
+            <p className={`text-center text-sm ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
               {message}
             </p>
           )}
 
-          <button type="submit" disabled={saving}
-            className="w-full bg-coral hover:bg-coral-dark py-3 rounded-lg font-medium transition disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full bg-coral hover:bg-coral-dark rounded-full py-3 font-medium disabled:opacity-50"
+          >
             {saving ? 'Saving...' : 'Save Profile'}
           </button>
         </form>
