@@ -61,8 +61,14 @@ export function getCitiesForCountry(countryCode) {
   return CITIES_BY_COUNTRY[countryCode] || []
 }
 
+export function getCountryName(code) {
+  const c = COUNTRIES.find(x => x.code === code)
+  return c ? c.name : code || ''
+}
+
 export function formatLocation(city, country) {
   if (!city && !country) return '—'
-  if (city && country) return `${city}, ${country}`
-  return city || country || '—'
+  const countryName = getCountryName(country)
+  if (city && countryName) return `${city}, ${countryName}`
+  return city || countryName || '—'
 }
