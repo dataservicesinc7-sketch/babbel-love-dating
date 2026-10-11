@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatLastSeen } from '../lib/status'
+import { formatLocation } from '../lib/locations'
 
 function ageFromDob(dob) {
   if (!dob) return null
@@ -46,7 +47,7 @@ function Discover() {
 
       setMe({ ...user, profile: myProfile })
 
-      // Bidirectional blocks: people I blocked OR people who blocked me
+      // Bidirectional blocks
       const { data: blockedByMe } = await supabase
         .from('blocks')
         .select('blocked_id')
@@ -64,9 +65,9 @@ function Discover() {
 
       let query = supabase
         .from('profiles')
-        .select('id, display_name, date_of_birth, city, relationship_goal, bio, gender, last_seen')
+        .select('id, display_name, date_of_birth, city, country, relationship_goal, bio, gender, last_seen, is_seed')
         .neq('id', user.id)
-        .limit(30)
+        .limit(40)
 
       if (blockedIds.length > 0) {
         query = query.not('id', 'in', `(${blockedIds.join(',')})`)
@@ -240,7 +241,7 @@ function Discover() {
                     {ageFromDob(p.date_of_birth) ? `, ${ageFromDob(p.date_of_birth)}` : ''}
                   </h2>
                   <p className="text-gray-400 text-sm mt-1 capitalize">
-                    {p.gender || '—'} · {p.city || '—'} · {p.relationship_goal || '—'}
+                    {p.gender || '—'} · {formatLocation(p.city, p.country)} · {p.relationship_goal || '—'}
                   </p>
                   <p className={`text-sm mt-1 ${formatLastSeen(p.last_seen) === 'Online now' ? 'text-green-400' : 'text-gray-500'}`}>
                     {formatLastSeen(p.last_seen)}
