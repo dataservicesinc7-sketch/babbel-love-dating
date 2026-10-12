@@ -17,8 +17,8 @@ function Admin() {
   const [search, setSearch] = useState('')
   const [users, setUsers] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
-  const [userPhotos, setUserPhotos] = useState([])          // from photos table
-  const [avatarUrl, setAvatarUrl] = useState(null)            // seed avatar_url
+  const [userPhotos, setUserPhotos] = useState([])
+  const [avatarUrl, setAvatarUrl] = useState(null)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [seedProfiles, setSeedProfiles] = useState([])
   const [stats, setStats] = useState({
@@ -105,19 +105,24 @@ function Admin() {
     setSeedProfiles(data || [])
   }
 
-  // ========== VIEW FULL PROFILE (works for seeds + real users) ==========
+  // ========== VIEW FULL PROFILE ==========
   const viewUser = async (user) => {
     setSelectedUser(user)
     setSection('detail')
     setAvatarUrl(user.avatar_url || null)
 
-    const { data: photos } = await supabase
+    const { data: photos, error } = await supabase
       .from('photos')
       .select('*')
       .eq('profile_id', user.id)
       .order('sort_order')
 
-    setUserPhotos(photos || [])
+    if (error) {
+      console.error('Error loading photos:', error)
+      setUserPhotos([])
+    } else {
+      setUserPhotos(photos || [])
+    }
   }
 
   // ========== RANKING ==========
@@ -140,7 +145,7 @@ function Admin() {
 
   // ========== DEACTIVATE / RESTORE / DELETE ==========
   const deactivateUser = async (id) => {
-    if (!confirm('Deactivate this account? It will no longer appear in Discover.')) return
+    if (!confirm('Deactivate this account?')) return
     const { error } = await supabase
       .from('profiles')
       .update({ is_active: false, status: 'deactivated' })
@@ -154,7 +159,7 @@ function Admin() {
   }
 
   const restoreUser = async (id) => {
-    if (!confirm('Restore / reactivate this account?')) return
+    if (!confirm('Restore this account?')) return
     const { error } = await supabase
       .from('profiles')
       .update({ is_active: true, status: 'active', deleted_at: null })
@@ -168,14 +173,10 @@ function Admin() {
   }
 
   const softDeleteUser = async (id) => {
-    if (!confirm('Soft-delete this account? You can restore it later.')) return
+    if (!confirm('Soft-delete this account?')) return
     const { error } = await supabase
       .from('profiles')
-      .update({
-        is_active: false,
-        status: 'deleted',
-        deleted_at: new Date().toISOString()
-      })
+      .update({ is_active: false, status: 'deleted', deleted_at: new Date().toISOString() })
       .eq('id', id)
     if (error) setMessage('Error: ' + error.message)
     else {
@@ -187,8 +188,8 @@ function Admin() {
   }
 
   const permanentDeleteUser = async (id, name) => {
-    if (!confirm(`PERMANENTLY delete ${name || 'this user'}? This cannot be undone.`)) return
-    if (!confirm('Final confirmation – all photos and data will be removed forever.')) return
+    if (!confirm(`PERMANENTLY delete ${name || 'this user'}?`)) return
+    if (!confirm('Final confirmation – irreversible.')) return
 
     try {
       const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
@@ -212,35 +213,35 @@ function Admin() {
       await loadStats()
       await loadSeeds()
     } catch (err) {
-      setMessage('Error during permanent delete: ' + err.message)
+      setMessage('Error: ' + err.message)
     }
   }
 
-  // ========== PHOTO MANAGEMENT (FIXED FOR SEEDS) ==========
+  // ========== PHOTO MANAGEMENT – FIXED ==========
   const deletePhoto = async (photoId, storagePath) => {
-    if (!confirm('Delete this photo permanently?')) return
+    if (!confirm('Delete this photo?')) return
     try {
       if (storagePath) {
         await supabase.storage.from('profile-photos').remove([storagePath])
       }
-      await supabase.from('photos').delete().eq('id', photoId)
+      const { error } = await supabase.from('photos').delete().eq('id', photoId)
+      if (error) throw error
       setMessage('Photo deleted')
-      // refresh
-      if (selectedUser) viewUser(selectedUser)
+      if (selectedUser) await viewUser(selectedUser)
     } catch (err) {
-      setMessage('Error deleting photo: ' + err.message)
+      setMessage('Delete failed: ' + err.message)
     }
   }
 
   const deleteAvatarUrl = async () => {
-    if (!selectedUser || !avatarUrl) return
-    if (!confirm('Remove the original seed avatar_url?')) return
+    if (!selectedUser) return
+    if (!confirm('Remove the original seed photo?')) return
     const { error } = await supabase
       .from('profiles')
       .update({ avatar_url: null })
       .eq('id', selectedUser.id)
     if (error) {
-      setMessage('Error: ' + error.message)
+      setMessage('Failed to remove seed photo: ' + error.message)
     } else {
       setAvatarUrl(null)
       setMessage('Original seed photo removed')
@@ -251,39 +252,68 @@ function Admin() {
   const addNewPhoto = async (e) => {
     const file = e.target.files?.[0]
     if (!file || !selectedUser) return
+
     if (userPhotos.length >= 6) {
       setMessage('Maximum 6 photos allowed')
       return
     }
+
     setUploadingPhoto(true)
+    setMessage('Uploading photo...')
+
     try {
+      // 1. Compress
       const compressed = await compressImage(file, 900, 0.8)
-      const ext = compressed.name?.split('.').pop() || 'webp'
+
+      // 2. Create unique path
+      const ext = (compressed.name || file.name || 'photo').split('.').pop() || 'webp'
       const path = `${selectedUser.id}/${Date.now()}.${ext}`
 
-      const { error: upError } = await supabase.storage
+      // 3. Upload to storage
+      const { error: uploadError } = await supabase.storage
         .from('profile-photos')
-        .upload(path, compressed, { upsert: true })
+        .upload(path, compressed, {
+          contentType: compressed.type || 'image/webp',
+          upsert: true
+        })
 
-      if (upError) throw upError
+      if (uploadError) {
+        throw new Error('Storage upload failed: ' + uploadError.message)
+      }
 
+      // 4. Insert into photos table
       const nextOrder = userPhotos.length === 0 ? 0 : Math.max(...userPhotos.map(p => p.sort_order || 0)) + 1
 
-      const { error: insertError } = await supabase.from('photos').insert({
-        profile_id: selectedUser.id,
-        storage_path: path,
-        sort_order: nextOrder
-      })
+      const { error: insertError } = await supabase
+        .from('photos')
+        .insert({
+          profile_id: selectedUser.id,
+          storage_path: path,
+          sort_order: nextOrder
+        })
 
-      if (insertError) throw insertError
+      if (insertError) {
+        throw new Error('Database insert failed: ' + insertError.message)
+      }
 
-      setMessage('Photo uploaded successfully')
-      // Force refresh
-      await viewUser(selectedUser)
+      // 5. Clear the old seed avatar_url so it never comes back
+      await supabase
+        .from('profiles')
+        .update({ avatar_url: null })
+        .eq('id', selectedUser.id)
+
+      setMessage('Photo uploaded successfully!')
+      setAvatarUrl(null)
+
+      // 6. Force full refresh of the profile
+      await viewUser({ ...selectedUser, avatar_url: null })
+      await loadUsers()
+
     } catch (err) {
-      setMessage('Upload failed: ' + err.message)
-      console.error(err)
+      console.error('Upload error:', err)
+      setMessage('UPLOAD FAILED: ' + err.message)
     }
+
     setUploadingPhoto(false)
     e.target.value = ''
   }
@@ -291,23 +321,38 @@ function Admin() {
   const replacePhoto = async (e, photoId, oldPath) => {
     const file = e.target.files?.[0]
     if (!file || !selectedUser) return
+
     setUploadingPhoto(true)
+    setMessage('Replacing photo...')
+
     try {
       const compressed = await compressImage(file, 900, 0.8)
-      const ext = compressed.name?.split('.').pop() || 'webp'
+      const ext = (compressed.name || file.name || 'photo').split('.').pop() || 'webp'
       const newPath = `${selectedUser.id}/${Date.now()}.${ext}`
 
-      await supabase.storage.from('profile-photos').upload(newPath, compressed, { upsert: true })
+      const { error: uploadError } = await supabase.storage
+        .from('profile-photos')
+        .upload(newPath, compressed, { upsert: true })
+
+      if (uploadError) throw new Error(uploadError.message)
+
       if (oldPath) {
         await supabase.storage.from('profile-photos').remove([oldPath])
       }
-      await supabase.from('photos').update({ storage_path: newPath }).eq('id', photoId)
 
-      setMessage('Photo replaced')
+      const { error: updateError } = await supabase
+        .from('photos')
+        .update({ storage_path: newPath })
+        .eq('id', photoId)
+
+      if (updateError) throw new Error(updateError.message)
+
+      setMessage('Photo replaced successfully')
       await viewUser(selectedUser)
     } catch (err) {
       setMessage('Replace failed: ' + err.message)
     }
+
     setUploadingPhoto(false)
     e.target.value = ''
   }
@@ -428,24 +473,21 @@ function Admin() {
               </div>
               <div className="bg-navy-light rounded-2xl p-6 text-center">
                 <p className="text-4xl font-bold">{stats.other}</p>
-                <p className="text-gray-400 mt-1">Other / Non-binary</p>
+                <p className="text-gray-400 mt-1">Other</p>
               </div>
             </div>
-            <button onClick={loadStats} className="mt-6 px-6 py-2 bg-coral rounded-full text-sm">
-              Refresh Stats
-            </button>
           </div>
         )}
 
-        {/* ALL USERS LIST */}
+        {/* ALL USERS */}
         {section === 'users' && (
           <div>
             <h1 className="text-3xl font-semibold mb-2">All Registered Users</h1>
-            <p className="text-gray-400 mb-5">{filteredUsers.length} users shown</p>
+            <p className="text-gray-400 mb-5">{filteredUsers.length} users</p>
 
             <input
               type="text"
-              placeholder="Search by name, city, gender or ID..."
+              placeholder="Search name, city, gender or ID..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full max-w-md px-4 py-3 rounded-xl bg-navy border border-gray-600 mb-6 focus:outline-none focus:border-coral"
@@ -454,8 +496,8 @@ function Admin() {
             <div className="space-y-3">
               {filteredUsers.map(u => (
                 <div key={u.id} className="bg-navy-light rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium text-lg truncate">
+                  <div>
+                    <p className="font-medium text-lg">
                       {u.display_name || 'No name'}
                       {u.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
                       {u.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">INACTIVE</span>}
@@ -464,17 +506,16 @@ function Admin() {
                       {u.gender} · {formatLocation(u.city, u.country)} · Rank: {u.admin_rank || 0}
                     </p>
                   </div>
-
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex gap-2">
                     <button
                       onClick={() => viewUser(u)}
-                      className="px-4 py-2 bg-coral hover:bg-coral/90 rounded-lg text-sm font-medium"
+                      className="px-4 py-2 bg-coral rounded-lg text-sm font-medium"
                     >
                       View Profile
                     </button>
                     <button
                       onClick={() => permanentDeleteUser(u.id, u.display_name)}
-                      className="px-3 py-2 bg-red-800 hover:bg-red-900 rounded-lg text-sm"
+                      className="px-3 py-2 bg-red-800 rounded-lg text-sm"
                     >
                       Delete
                     </button>
@@ -485,7 +526,7 @@ function Admin() {
           </div>
         )}
 
-        {/* FULL PROFILE DETAIL – FIXED FOR SEEDS */}
+        {/* PROFILE DETAIL */}
         {section === 'detail' && selectedUser && (
           <div>
             <button
@@ -505,25 +546,16 @@ function Admin() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {selectedUser.is_active === false ? (
-                  <button onClick={() => restoreUser(selectedUser.id)} className="px-4 py-2 bg-green-700 rounded-lg text-sm">
-                    Restore
-                  </button>
+                  <button onClick={() => restoreUser(selectedUser.id)} className="px-4 py-2 bg-green-700 rounded-lg text-sm">Restore</button>
                 ) : (
-                  <button onClick={() => deactivateUser(selectedUser.id)} className="px-4 py-2 bg-orange-700 rounded-lg text-sm">
-                    Deactivate
-                  </button>
+                  <button onClick={() => deactivateUser(selectedUser.id)} className="px-4 py-2 bg-orange-700 rounded-lg text-sm">Deactivate</button>
                 )}
-                <button onClick={() => softDeleteUser(selectedUser.id)} className="px-4 py-2 bg-yellow-700 rounded-lg text-sm">
-                  Soft Delete
-                </button>
-                <button onClick={() => permanentDeleteUser(selectedUser.id, selectedUser.display_name)} className="px-4 py-2 bg-red-800 rounded-lg text-sm">
-                  Permanent Delete
-                </button>
+                <button onClick={() => softDeleteUser(selectedUser.id)} className="px-4 py-2 bg-yellow-700 rounded-lg text-sm">Soft Delete</button>
+                <button onClick={() => permanentDeleteUser(selectedUser.id, selectedUser.display_name)} className="px-4 py-2 bg-red-800 rounded-lg text-sm">Permanent Delete</button>
               </div>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-6 mb-8">
-              {/* Info */}
+            <div className="grid md:grid-cols-2 gap-6">
               <div className="bg-navy-light rounded-2xl p-6 space-y-3">
                 <h2 className="text-xl font-semibold mb-3">Profile Information</h2>
                 <p><span className="text-gray-400">Gender:</span> {selectedUser.gender || '—'}</p>
@@ -532,21 +564,16 @@ function Admin() {
                 <p><span className="text-gray-400">Location:</span> {formatLocation(selectedUser.city, selectedUser.country)}</p>
                 <p><span className="text-gray-400">Date of Birth:</span> {selectedUser.date_of_birth || '—'}</p>
                 <p><span className="text-gray-400">Status:</span> {selectedUser.status || 'active'}</p>
-                <p><span className="text-gray-400">Active:</span> {selectedUser.is_active !== false ? 'Yes' : 'No'}</p>
                 <div className="pt-3">
                   <p className="text-gray-400 mb-1">Bio:</p>
                   <p className="bg-navy p-3 rounded-lg text-sm">{selectedUser.bio || 'No bio'}</p>
                 </div>
               </div>
 
-              {/* Ranking + Photos */}
               <div className="space-y-6">
-                {/* Ranking */}
                 <div className="bg-navy-light rounded-2xl p-6">
                   <h2 className="text-xl font-semibold mb-3">Admin Ranking</h2>
-                  <p className="text-sm text-gray-400 mb-3">
-                    Higher number = appears first in Discover. Default is 0.
-                  </p>
+                  <p className="text-sm text-gray-400 mb-3">Higher number = appears first in Discover</p>
                   <input
                     type="number"
                     defaultValue={selectedUser.admin_rank || 0}
@@ -555,50 +582,45 @@ function Admin() {
                   />
                 </div>
 
-                {/* PHOTOS – NOW HANDLES SEEDS CORRECTLY */}
+                {/* PHOTOS SECTION */}
                 <div className="bg-navy-light rounded-2xl p-6">
                   <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-semibold">
-                      Photos ({userPhotos.length + (avatarUrl ? 1 : 0)}/6)
+                      Photos ({userPhotos.length + (avatarUrl ? 1 : 0)})
                     </h2>
-                    {userPhotos.length < 6 && (
-                      <label className="px-4 py-2 bg-coral rounded-lg text-sm cursor-pointer">
-                        {uploadingPhoto ? 'Uploading...' : '+ Add Photo'}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={addNewPhoto}
-                          disabled={uploadingPhoto}
-                        />
-                      </label>
-                    )}
+                    <label className="px-4 py-2 bg-coral rounded-lg text-sm cursor-pointer">
+                      {uploadingPhoto ? 'Uploading...' : '+ Add Photo'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={addNewPhoto}
+                        disabled={uploadingPhoto}
+                      />
+                    </label>
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {/* Show original seed avatar_url if it exists */}
+                    {/* Old seed avatar */}
                     {avatarUrl && (
                       <div className="relative group">
-                        <img src={avatarUrl} alt="Seed avatar" className="w-full h-36 object-cover rounded-xl border-2 border-yellow-600" />
+                        <img src={avatarUrl} alt="Seed" className="w-full h-36 object-cover rounded-xl border-2 border-yellow-500" />
                         <div className="absolute top-1 left-1 bg-yellow-600 text-xs px-1.5 py-0.5 rounded">SEED</div>
-                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center rounded-xl">
-                          <button
-                            onClick={deleteAvatarUrl}
-                            className="px-3 py-1 bg-red-600 rounded text-sm"
-                          >
+                        <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition flex items-center justify-center rounded-xl">
+                          <button onClick={deleteAvatarUrl} className="px-3 py-1 bg-red-600 rounded text-sm">
                             Remove
                           </button>
                         </div>
                       </div>
                     )}
 
-                    {/* Photos from the photos table */}
+                    {/* Real photos from storage */}
                     {userPhotos.map(ph => {
                       const url = supabase.storage.from('profile-photos').getPublicUrl(ph.storage_path).data.publicUrl
                       return (
                         <div key={ph.id} className="relative group">
                           <img src={url} alt="" className="w-full h-36 object-cover rounded-xl" />
-                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2 rounded-xl">
+                          <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2 rounded-xl">
                             <button
                               onClick={() => deletePhoto(ph.id, ph.storage_path)}
                               className="px-3 py-1 bg-red-600 rounded text-sm"
@@ -622,7 +644,7 @@ function Admin() {
                   </div>
 
                   {userPhotos.length === 0 && !avatarUrl && (
-                    <p className="text-gray-400 mt-3">No photos yet. Use “+ Add Photo” above.</p>
+                    <p className="text-gray-400 mt-4 text-sm">No photos. Click “+ Add Photo” to upload one.</p>
                   )}
                 </div>
               </div>
@@ -634,40 +656,30 @@ function Admin() {
         {section === 'seeds' && (
           <div>
             <div className="flex justify-between items-center mb-6">
-              <h1 className="text-3xl font-semibold">Seed / Fake Profiles ({seedProfiles.length})</h1>
+              <h1 className="text-3xl font-semibold">Seed Profiles ({seedProfiles.length})</h1>
               {seedProfiles.length > 0 && (
                 <button onClick={deleteAllSeeds} className="px-5 py-2 bg-red-700 rounded-full text-sm">
                   Delete All Seeds
                 </button>
               )}
             </div>
-            {seedProfiles.length === 0 ? (
-              <p className="text-gray-400">No seed profiles remaining.</p>
-            ) : (
-              <div className="space-y-3">
-                {seedProfiles.map(p => (
-                  <div key={p.id} className="bg-navy-light p-4 rounded-xl flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      {p.avatar_url && (
-                        <img src={p.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
-                      )}
-                      <div>
-                        <p className="font-medium">{p.display_name}</p>
-                        <p className="text-sm text-gray-400">{p.gender} · {formatLocation(p.city, p.country)}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button onClick={() => viewUser(p)} className="text-coral text-sm">
-                        View / Edit Photos
-                      </button>
-                      <button onClick={() => deleteSeed(p.id)} className="text-red-400 text-sm">
-                        Delete
-                      </button>
+            <div className="space-y-3">
+              {seedProfiles.map(p => (
+                <div key={p.id} className="bg-navy-light p-4 rounded-xl flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    {p.avatar_url && <img src={p.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />}
+                    <div>
+                      <p className="font-medium">{p.display_name}</p>
+                      <p className="text-sm text-gray-400">{p.gender} · {formatLocation(p.city, p.country)}</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div className="flex gap-3">
+                    <button onClick={() => viewUser(p)} className="text-coral text-sm">View / Edit Photos</button>
+                    <button onClick={() => deleteSeed(p.id)} className="text-red-400 text-sm">Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </main>
