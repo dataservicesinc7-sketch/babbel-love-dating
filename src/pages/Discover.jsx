@@ -65,7 +65,7 @@ function Discover() {
 
       let query = supabase
         .from('profiles')
-        .select('id, display_name, date_of_birth, city, country, relationship_goal, bio, gender, last_seen, is_seed')
+        .select('id, display_name, date_of_birth, city, country, relationship_goal, bio, gender, last_seen, is_seed, avatar_url')
         .neq('id', user.id)
         .limit(40)
 
@@ -101,7 +101,8 @@ function Discover() {
 
       const withPhotos = (others || []).map(p => ({
         ...p,
-        photo: photoMap[p.id] || null
+        // Prefer real uploaded photo, fall back to seed avatar_url
+        photo: photoMap[p.id] || p.avatar_url || null
       }))
 
       setProfiles(withPhotos)
