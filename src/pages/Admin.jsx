@@ -148,7 +148,7 @@ function Admin() {
       let list = data || []
 
       if (memberSearch.trim()) {
-        const s = memberSearch downstream.toLowerCase()
+        const s = memberSearch.toLowerCase()
         list = list.filter(m =>
           (m.display_name || '').toLowerCase().includes(s) ||
           (m.city || '').toLowerCase().includes(s) ||
@@ -200,7 +200,7 @@ function Admin() {
     loadMembers()
     loadStats()
     if (selectedMember?.id === id) {
-      setSelectedMember(prev => ({ ...prev, is_suspended: freizeitcurrentlySuspended }))
+      setSelectedMember(prev => ({ ...prev, is_suspended: !currentlySuspended }))
     }
   }
 
@@ -310,7 +310,7 @@ function Admin() {
     })
   }
 
-  // NEW: permanently clear the original seed avatar_url
+  // NEW – permanently delete the original seed photo
   const clearSeedAvatar = async () => {
     if (!photoModal?.avatar_url) return
     if (!confirm('Permanently remove the original seed picture? It will never come back.')) return
@@ -484,6 +484,7 @@ function Admin() {
             <div className="bg-navy-light p-5 rounded-2xl">
               <p className="text-3xl font-bold">{stats.otherGender}</p>
               <p className="text-sm text-gray-400">Other / Non-binary</p>
+            lim>
             </div>
             <div className="bg-navy-light p-5 rounded-2xl">
               <p className="text-3xl font-bold">{stats.seedCount}</p>
@@ -753,10 +754,12 @@ function Admin() {
               <button onClick={() => setPhotoModal(null)} className="text-2xl leading-none">×</button>
             </div>
 
-            {/* ===== ONLY ADDITION: show & permanently delete original seed photo ===== */}
+            {/* ===== ONLY NEW PART: original seed photo ===== */}
             {photoModal.avatar_url && (
               <div className="mb-6 p-4 bg-navy rounded-xl border border-yellow-600/60">
-                <p className="text-sm text-yellow-400 font-medium mb-2">Original seed picture (this is the one that kept coming back)</p>
+                <p className="text-sm text-yellow-400 font-medium mb-2">
+                  Original seed picture (this is the one that kept coming back)
+                </p>
                 <div className="flex items-center gap-4">
                   <img
                     src={photoModal.avatar_url}
