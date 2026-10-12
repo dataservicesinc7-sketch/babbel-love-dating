@@ -3,12 +3,16 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatLocation } from '../lib/locations'
 
+// ========== CHANGE THIS TO YOUR OWNER EMAIL ==========
+const OWNER_EMAIL = 'babbel.team.yourname@gmail.com'   // ← put your real owner email here
+// ====================================================
+
 function Admin() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [seedProfiles, setSeedProfiles] = useState([])
   const [message, setMessage] = useState('')
-  const [user, setUser] = useState(null)
+  const [authorized, setAuthorized] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -17,14 +21,19 @@ function Admin() {
         navigate('/login')
         return
       }
-      setUser(user)
 
-      // Simple protection: only the project owner email can access.
-      // Change this email to your Babbel admin email if different.
-      // For now we allow any logged-in user so you can test; tighten later.
+      // Only the owner email can access Admin
+      if (user.email?.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+        setAuthorized(false)
+        setLoading(false)
+        return
+      }
+
+      setAuthorized(true)
+
       const { data } = await supabase
         .from('profiles')
-        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at')
+        .select('id, display_name, city, country, gender, relationship_goal, is_seed, avatar_url, created_at')
         .eq('is_seed', true)
         .order('created_at', { ascending: false })
 
@@ -64,6 +73,16 @@ function Admin() {
     )
   }
 
+  if (!authorized) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-navy text-white gap-4">
+        <h1 className="text-2xl font-semibold">Access denied</h1>
+        <p className="text-gray-400">This page is only for the site owner.</p>
+        <Link to="/dashboard" className="text-coral underline">Back to Dashboard</Link>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-navy text-white pb-12">
       <header className="py-6 px-4 flex justify-between items-center max-w-5xl mx-auto w-full">
@@ -97,16 +116,21 @@ function Admin() {
           ) : (
             <div className="space-y-3">
               {seedProfiles.map(p => (
-                <div key={p.id} className="flex justify-between items-center bg-navy p-3 rounded-lg">
-                  <div>
-                    <p className="font-medium">{p.display_name}</p>
-                    <p className="text-sm text-gray-400">
-                      {p.gender} · {formatLocation(p.city, p.country)} · {p.relationship_goal}
-                    </p>
+                <div key={p.id} className="flex justify-between items-center bg-navy p-3 rounded-lg gap-4">
+                  <div className="flex items-center gap-3">
+                    {p.avatar_url && (
+                      <img src={p.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
+                    )}
+                    <div>
+                      <p className="font-medium">{p.display_name}</p>
+                      <p className="text-sm text-gray-400">
+                        {p.gender} · {formatLocation(p.city, p.country)} · {p.relationship_goal}
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => deleteSeed(p.id)}
-                    className="text-sm text-red-400 hover:text-red-300"
+                    className="text-sm text-red-400 hover:text-red-300 whitespace-nowrap"
                   >
                     Delete
                   </button>
