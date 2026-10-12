@@ -172,7 +172,7 @@ function Profile() {
     }
   }
 
-  // NEW: Delete a photo (user can remove any of their own photos)
+  // ===== NEW: Delete photo (only addition) =====
   const deletePhoto = async (photoId, storagePath) => {
     if (!user) return
     if (!confirm('Delete this photo permanently? This cannot be undone.')) return
@@ -186,7 +186,7 @@ function Profile() {
       const { error } = await supabase.from('photos').delete().eq('id', photoId).eq('profile_id', user.id)
       if (error) throw error
 
-      // Reload remaining photos and re-order so primary stays 0 if needed
+      // Reload remaining photos
       const { data: photoRows } = await supabase
         .from('photos')
         .select('*')
@@ -372,7 +372,7 @@ function Profile() {
                       Set main
                     </button>
                   )}
-                  {/* NEW: Delete button on every photo */}
+                  {/* NEW delete button */}
                   <button
                     type="button"
                     onClick={() => deletePhoto(p.id, p.storage_path)}
