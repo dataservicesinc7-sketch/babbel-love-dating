@@ -43,8 +43,8 @@ function Admin() {
   // Reports (assumes a reports table exists or falls back gracefully)
   const [reports, setReports] = useState([])
 
-  // Photo edit modal – now also carries avatar_url for seeds
-  const [photoModal, setPhotoModal] = useState(null) // { profileId, photos: [], avatar_url: string|null }
+  // Photo edit modal
+  const [photoModal, setPhotoModal] = useState(null) // { profileId, photos: [], avatar_url: null }
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
   useEffect(() => {
@@ -135,7 +135,7 @@ function Admin() {
     try {
       let query = supabase
         .from('profiles')
-        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for, avatar_url')
+        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for')
         .order('created_at', { ascending: false })
         .limit(300)
 
@@ -148,7 +148,7 @@ function Admin() {
       let list = data || []
 
       if (memberSearch.trim()) {
-        const s = memberSearch.toLowerCase()
+        const s = memberSearch downstream.toLowerCase()
         list = list.filter(m =>
           (m.display_name || '').toLowerCase().includes(s) ||
           (m.city || '').toLowerCase().includes(s) ||
@@ -200,7 +200,7 @@ function Admin() {
     loadMembers()
     loadStats()
     if (selectedMember?.id === id) {
-      setSelectedMember(prev => ({ ...prev, is_suspended: !currentlySuspended }))
+      setSelectedMember(prev => ({ ...prev, is_suspended: freizeitcurrentlySuspended }))
     }
   }
 
@@ -289,7 +289,7 @@ function Admin() {
     loadMembers()
   }
 
-  // ===== Photo management for any member (now handles avatar_url) =====
+  // ===== Photo management for any member =====
   const openPhotoModal = async (profileId) => {
     const [{ data: photoRows }, { data: profile }] = await Promise.all([
       supabase
@@ -310,8 +310,9 @@ function Admin() {
     })
   }
 
+  // NEW: permanently clear the original seed avatar_url
   const clearSeedAvatar = async () => {
-    if (!photoModal) return
+    if (!photoModal?.avatar_url) return
     if (!confirm('Permanently remove the original seed picture? It will never come back.')) return
     try {
       const { error } = await supabase
@@ -332,11 +333,9 @@ function Admin() {
     if (!confirm('Delete this photo permanently?')) return
     try {
       if (storagePath) {
-        const { error: storageErr } = await supabase.storage.from('profile-photos').remove([storagePath])
-        if (storageErr) console.warn('Storage remove warning:', storageErr.message)
+        await supabase.storage.from('profile-photos').remove([storagePath])
       }
-      const { error } = await supabase.from('photos').delete().eq('id', photoId)
-      if (error) throw error
+      await supabase.from('photos').delete().eq('id', photoId)
       if (photoModal) openPhotoModal(photoModal.profileId)
       setMessage('Photo deleted by admin.')
       loadStats()
@@ -362,15 +361,13 @@ function Admin() {
       if (upError) throw upError
 
       const nextOrder = photoModal.photos.length === 0 ? 0 : Math.max(...photoModal.photos.map(p => p.sort_order || 0)) + 1
-      const { error: insertErr } = await supabase.from('photos').insert({
+      await supabase.from('photos').insert({
         profile_id: photoModal.profileId,
         storage_path: path,
         sort_order: nextOrder
       })
-      if (insertErr) throw insertErr
 
-      // Important: once a real photo exists, permanently clear the old seed avatar_url
-      // so it can never come back
+      // Also clear the old seed avatar so it never returns
       if (photoModal.avatar_url) {
         await supabase
           .from('profiles')
@@ -379,7 +376,7 @@ function Admin() {
       }
 
       openPhotoModal(photoModal.profileId)
-      setMessage('Photo uploaded by admin. Original seed picture (if any) has been cleared permanently.')
+      setMessage('Photo uploaded by admin.')
       loadStats()
       loadSeeds()
       loadMembers()
@@ -430,15 +427,15 @@ function Admin() {
     <div className="min-h-screen bg-navy text-white pb-16">
       <header className="py-6 px-4 flex justify-between items-center max-w-6xl mx-auto w-full">
         <Link to="/dashboard" className="text-2xl font-bold">
-          <span className="text-coral">Babbel</span> Love Dating – Admin
+          <span className="text-coral">Babbel</span> Admin
         </Link>
-        <div className="flex gap-4 text-sm">
-          <Link to="/dashboard" className="hover:text-coral">Dashboard</Link>
-          <Link to="/" className="hover:text-coral">Home</Link>
-        </div>
+        <Link to="/dashboard" className="text-sm hover:text-coral">← Back to Dashboard</Link>
       </header>
 
       <main className="max-w-6xl mx-auto px-4">
+        <h1 className="text-3xl font-semibold mb-2">Admin Control Panel</h1>
+        <p className="text-gray-400 mb-6">Full control: stats, members, photos, reports, seeds. Safety first.</p>
+
         {message && (
           <p className="mb-4 text-coral bg-navy-light px-4 py-2 rounded-lg flex justify-between items-center">
             <span>{message}</span>
@@ -742,13 +739,12 @@ function Admin() {
             <p className="text-gray-400 mb-4">
               Total photos in storage: <strong className="text-white">{stats.photosCount}</strong>.  
               Use the Members tab → “Photos” button to view / upload / delete photos for any user.
-              For seed profiles the original external picture (avatar_url) is also shown and can be permanently removed.
             </p>
           </div>
         )}
       </main>
 
-      {/* Photo management modal – now handles avatar_url */}
+      {/* Photo management modal */}
       {photoModal && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setPhotoModal(null)}>
           <div className="bg-navy-light rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -757,25 +753,22 @@ function Admin() {
               <button onClick={() => setPhotoModal(null)} className="text-2xl leading-none">×</button>
             </div>
 
-            {/* Original seed avatar (the one that was coming back) */}
+            {/* ===== ONLY ADDITION: show & permanently delete original seed photo ===== */}
             {photoModal.avatar_url && (
-              <div className="mb-6 p-4 bg-navy rounded-xl border border-yellow-600/50">
-                <p className="text-sm text-yellow-400 mb-2 font-medium">Original seed picture (external)</p>
+              <div className="mb-6 p-4 bg-navy rounded-xl border border-yellow-600/60">
+                <p className="text-sm text-yellow-400 font-medium mb-2">Original seed picture (this is the one that kept coming back)</p>
                 <div className="flex items-center gap-4">
                   <img
                     src={photoModal.avatar_url}
                     alt="Original seed"
                     className="w-24 h-24 object-cover rounded-lg"
                   />
-                  <div>
-                    <p className="text-xs text-gray-400 mb-2">This is the picture that kept coming back. It is stored in the profile, not in the photos table.</p>
-                    <button
-                      onClick={clearSeedAvatar}
-                      className="px-4 py-2 bg-red-700 hover:bg-red-800 rounded-lg text-sm"
-                    >
-                      Permanently remove original
-                    </button>
-                  </div>
+                  <button
+                    onClick={clearSeedAvatar}
+                    className="px-4 py-2 bg-red-700 hover:bg-red-800 rounded-lg text-sm"
+                  >
+                    Permanently remove original
+                  </button>
                 </div>
               </div>
             )}
@@ -806,11 +799,6 @@ function Admin() {
                 <label className="block text-sm mb-1">Upload new photo for this user</label>
                 <input type="file" accept="image/*" onChange={adminUploadPhoto} disabled={uploadingPhoto} />
                 {uploadingPhoto && <p className="text-sm text-coral mt-1">Uploading...</p>}
-                {photoModal.avatar_url && (
-                  <p className="text-xs text-gray-400 mt-2">
-                    Uploading a real photo will automatically clear the original seed picture so it never returns.
-                  </p>
-                )}
               </div>
             )}
           </div>
