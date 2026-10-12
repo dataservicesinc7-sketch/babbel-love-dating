@@ -86,14 +86,22 @@ function ViewProfile() {
       <main className="max-w-xl mx-auto px-4">
         <div className="bg-navy-light rounded-2xl p-6">
           <div className="flex gap-3 overflow-x-auto mb-5 pb-2">
-            {photos.length > 0 ? photos.map(p => (
+            {photos.length > 0 ? (
+              photos.map(p => (
+                <img
+                  key={p.id}
+                  src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
+                  alt=""
+                  className={`w-40 h-52 object-cover rounded-xl flex-shrink-0 ${p.sort_order === 0 ? 'ring-2 ring-coral' : ''}`}
+                />
+              ))
+            ) : profile.avatar_url ? (
               <img
-                key={p.id}
-                src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
+                src={profile.avatar_url}
                 alt=""
-                className={`w-40 h-52 object-cover rounded-xl flex-shrink-0 ${p.sort_order === 0 ? 'ring-2 ring-coral' : ''}`}
+                className="w-40 h-52 object-cover rounded-xl"
               />
-            )) : (
+            ) : (
               <div className="w-40 h-52 bg-navy rounded-xl flex items-center justify-center text-gray-500">
                 No photo
               </div>
@@ -112,7 +120,9 @@ function ViewProfile() {
           <p className="text-gray-400 mt-1 capitalize">
             {profile.gender || '—'} · {formatLocation(profile.city, profile.country)}
           </p>
-          <p className="mt-2 capitalize text-coral">{profile.relationship_goal?.replace('-', ' ') || ''}</p>
+          <p className="mt-2 capitalize text-coral">
+            {profile.relationship_goal?.replace('-', ' ') || ''}
+          </p>
 
           {profile.bio && (
             <p className="mt-4 text-gray-200 whitespace-pre-wrap">{profile.bio}</p>
