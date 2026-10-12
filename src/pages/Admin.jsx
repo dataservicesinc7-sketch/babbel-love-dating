@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { formatLocation } from '../lib/locations'
 
 // ========== CHANGE THIS TO YOUR OWNER EMAIL ==========
-const OWNER_EMAIL = 'babbel.team.yourname@gmail.com'   // ← put your real owner email here
+const OWNER_EMAIL = 'dataservicesinc7@gmail.com'   // ← put your real owner email here
 // ====================================================
 
 function Admin() {
