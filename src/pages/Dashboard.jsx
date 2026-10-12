@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { formatLocation } from '../lib/locations'
+
+// Must match the email in Admin.jsx
+const OWNER_EMAIL = 'dataservicesinc7@gmail.com'
 
 function Dashboard() {
   const navigate = useNavigate()
@@ -21,6 +23,7 @@ function Dashboard() {
       }
       setUser(user)
 
+      // Always update last_seen
       await supabase.from('profiles').upsert({
         id: user.id,
         last_seen: new Date().toISOString()
@@ -95,6 +98,7 @@ function Dashboard() {
   }
 
   const profileReady = profile?.display_name && profile?.city && photoCount > 0
+  const isOwner = user?.email?.toLowerCase() === OWNER_EMAIL.toLowerCase()
 
   return (
     <div className="min-h-screen bg-navy text-white flex flex-col">
@@ -125,7 +129,7 @@ function Dashboard() {
           <p className="text-gray-300 mb-6">{user?.email}</p>
 
           <div className="bg-navy-light rounded-2xl p-6 text-left mb-8 space-y-2">
-            <p><span className="text-gray-400">Location:</span> {formatLocation(profile?.city, profile?.country)}</p>
+            <p><span className="text-gray-400">City:</span> {profile?.city || '—'}</p>
             <p><span className="text-gray-400">Gender:</span> <span className="capitalize">{profile?.gender || '—'}</span></p>
             <p><span className="text-gray-400">Goal:</span> {profile?.relationship_goal || '—'}</p>
             <p><span className="text-gray-400">Photos:</span> {photoCount}</p>
@@ -178,13 +182,16 @@ function Dashboard() {
             >
               Safety Center
             </Link>
-            {/* Admin link – only visible to you later; for now always shown so you can reach it */}
-            <Link
-              to="/admin"
-              className="border border-yellow-600 text-yellow-400 hover:bg-yellow-900/30 transition font-medium py-3 px-8 rounded-full"
-            >
-              Admin Panel
-            </Link>
+
+            {/* Admin button – ONLY visible to the owner */}
+            {isOwner && (
+              <Link
+                to="/admin"
+                className="border border-yellow-500 text-yellow-400 hover:bg-yellow-500 hover:text-navy transition font-medium py-3 px-8 rounded-full"
+              >
+                ⚙️ Admin Control Panel
+              </Link>
+            )}
           </div>
         </div>
       </main>
