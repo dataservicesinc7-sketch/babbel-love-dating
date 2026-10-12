@@ -15,7 +15,6 @@ function Admin() {
   const [message, setMessage] = useState('')
   const [activeTab, setActiveTab] = useState('stats')
 
-  // Stats
   const [stats, setStats] = useState({
     totalMembers: 0,
     seedCount: 0,
@@ -30,19 +29,15 @@ function Admin() {
     openReports: 0
   })
 
-  // Users
   const [members, setMembers] = useState([])
   const [memberFilter, setMemberFilter] = useState('all')
   const [memberSearch, setMemberSearch] = useState('')
   const [selectedMember, setSelectedMember] = useState(null)
+  const [selectedMemberPhotos, setSelectedMemberPhotos] = useState([])
 
-  // Seeds
   const [seedProfiles, setSeedProfiles] = useState([])
-
-  // Reports
   const [reports, setReports] = useState([])
 
-  // Photo modal
   const [photoModal, setPhotoModal] = useState(null)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
@@ -53,13 +48,11 @@ function Admin() {
         navigate('/login')
         return
       }
-
       if (user.email?.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
         setAuthorized(false)
         setLoading(false)
         return
       }
-
       setAuthorized(true)
       await Promise.all([loadStats(), loadMembers(), loadSeeds(), loadReports()])
       setLoading(false)
@@ -120,10 +113,9 @@ function Admin() {
     }
   }
 
-  // ---------- USERS (safe select – only columns that exist) ----------
+  // ---------- USERS ----------
   const loadMembers = async () => {
     try {
-      // Safe columns that exist in almost every Babbel profiles table
       let query = supabase
         .from('profiles')
         .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, bio, date_of_birth, looking_for, avatar_url')
@@ -134,16 +126,13 @@ function Admin() {
       if (memberFilter === 'real') query = query.or('is_seed.is.null,is_seed.eq.false')
 
       const { data, error } = await query
-
       if (error) {
-        console.error('loadMembers error:', error)
         setMessage('Error loading users: ' + error.message)
         setMembers([])
         return
       }
 
       let list = data || []
-
       if (memberSearch.trim()) {
         const s = memberSearch.toLowerCase()
         list = list.filter(m =>
@@ -153,10 +142,8 @@ function Admin() {
           (m.id || '').toLowerCase().includes(s)
         )
       }
-
       setMembers(list)
     } catch (err) {
-      console.error(err)
       setMessage('Error loading users')
     }
   }
@@ -166,30 +153,23 @@ function Admin() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, display_name, city, country, gender, relationship_goal, is_seed, avatar_url, created_at')
+        .select('id, display_name, city, country, gender, relationship_goal, is_seed, avatar_url, created_at, bio, date_of_birth, looking_for, last_seen')
         .eq('is_seed', true)
         .order('created_at', { ascending: false })
 
       if (error) {
-        console.error('loadSeeds error:', error)
         setSeedProfiles([])
         return
       }
       setSeedProfiles(data || [])
     } catch (err) {
-      console.error(err)
       setSeedProfiles([])
     }
   }
 
-  // ---------- REPORTS ----------
   const loadReports = async () => {
     try {
-      const { data } = await supabase
-        .from('reports')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100)
+      const { data } = await supabase.from('reports').select('*').order('created_at', { ascending: false }).limit(100)
       setReports(data || [])
     } catch (_) {
       setReports([])
@@ -202,18 +182,14 @@ function Admin() {
     if (!confirm('Final confirmation – irreversible.')) return
 
     try {
-      // Delete photos from storage + table
       const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
       if (photos?.length) {
         const paths = photos.map(p => p.storage_path).filter(Boolean)
         if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
       }
       await supabase.from('photos').delete().eq('profile_id', id)
-
-      // Clear avatar just in case
       await supabase.from('profiles').update({ avatar_url: null }).eq('id', id)
 
-      // Delete profile
       const { error } = await supabase.from('profiles').delete().eq('id', id)
       if (error) throw error
 
@@ -223,7 +199,8 @@ function Admin() {
       loadSeeds()
       loadStats()
     } catch (err) {
-      setMessage('Error: ' + err.message)
+      setMessage('Delete failed: ' + err.message)
+      console.error(err)
     }
   }
 
@@ -241,12 +218,13 @@ function Admin() {
       const { error } = await supabase.from('profiles').delete().eq('id', id)
       if (error) throw error
 
-      setMessage('Seed deleted.')
+      setMessage('Seed deleted successfully.')
       loadSeeds()
       loadMembers()
       loadStats()
     } catch (err) {
-      setMessage('Error: ' + err.message)
+      setMessage('Seed delete failed: ' + err.message)
+      console.error(err)
     }
   }
 
@@ -271,7 +249,7 @@ function Admin() {
       loadMembers()
       loadStats()
     } catch (err) {
-      setMessage('Error: ' + err.message)
+      setMessage('Delete all seeds failed: ' + err.message)
     }
   }
 
@@ -280,10 +258,11 @@ function Admin() {
     try {
       const [{ data: photoRows }, { data: profile }] = await Promise.all([
         supabase.from('photos').select('*').eq('profile_id', profileId).order('sort_order'),
-        supabase.from('profiles').select('avatar_url').eq('id', profileId).maybeSingle()
+        supabase.from('profiles').select('avatar_url, display_name').eq('id', profileId).maybeSingle()
       ])
       setPhotoModal({
         profileId,
+        displayName: profile?.display_name || 'User',
         photos: photoRows || [],
         avatar_url: profile?.avatar_url || null
       })
@@ -298,29 +277,43 @@ function Admin() {
       if (storagePath) {
         await supabase.storage.from('profile-photos').remove([storagePath])
       }
-      await supabase.from('photos').delete().eq('id', photoId)
+      const { error } = await supabase.from('photos').delete().eq('id', photoId)
+      if (error) throw error
       openPhotoModal(photoModal.profileId)
       setMessage('Photo deleted.')
       loadStats()
     } catch (err) {
-      setMessage('Error: ' + err.message)
+      setMessage('Photo delete failed: ' + err.message)
     }
   }
 
   const adminClearAvatar = async () => {
-    if (!photoModal || !confirm('Remove the main / seed avatar picture?')) return
+    if (!photoModal) return
+    if (!confirm('Remove the seed / main avatar picture?')) return
+
     try {
       const { error } = await supabase
         .from('profiles')
         .update({ avatar_url: null })
         .eq('id', photoModal.profileId)
-      if (error) throw error
+
+      if (error) {
+        setMessage('Failed to remove avatar: ' + error.message)
+        console.error('Clear avatar error:', error)
+        return
+      }
+
+      // Force refresh
       openPhotoModal(photoModal.profileId)
-      setMessage('Avatar / seed picture removed.')
+      setMessage('Seed / avatar picture removed successfully.')
       loadSeeds()
       loadMembers()
+      if (selectedMember?.id === photoModal.profileId) {
+        setSelectedMember(prev => ({ ...prev, avatar_url: null }))
+      }
     } catch (err) {
-      setMessage('Error: ' + err.message)
+      setMessage('Error clearing avatar: ' + err.message)
+      console.error(err)
     }
   }
 
@@ -353,7 +346,7 @@ function Admin() {
       setMessage('Photo uploaded.')
       loadStats()
     } catch (err) {
-      setMessage('Error: ' + err.message)
+      setMessage('Upload failed: ' + err.message)
     }
     setUploadingPhoto(false)
     e.target.value = ''
@@ -370,9 +363,22 @@ function Admin() {
     }
   }
 
-  const viewFullProfile = (member) => {
+  // View full profile + load photos
+  const viewFullProfile = async (member) => {
     setSelectedMember(member)
     setActiveTab('profile')
+
+    // Load photos for this user
+    try {
+      const { data: photoRows } = await supabase
+        .from('photos')
+        .select('*')
+        .eq('profile_id', member.id)
+        .order('sort_order')
+      setSelectedMemberPhotos(photoRows || [])
+    } catch (_) {
+      setSelectedMemberPhotos([])
+    }
   }
 
   // ---------- RENDER ----------
@@ -518,49 +524,45 @@ function Admin() {
             <div className="space-y-3">
               {members.map(m => (
                 <div key={m.id} className="bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium">
-                      {m.display_name || 'No name'}
-                      {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      {m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
-                      {m.last_seen && ` · Last seen ${new Date(m.last_seen).toLocaleString()}`}
-                    </p>
+                  <div className="flex items-center gap-3">
+                    {m.avatar_url && (
+                      <img src={m.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
+                    )}
+                    <div>
+                      <p className="font-medium">
+                        {m.display_name || 'No name'}
+                        {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
+                      </p>
+                      <p className="text-sm text-gray-400">
+                        {m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => viewFullProfile(m)}
-                      className="px-3 py-1.5 bg-coral hover:bg-coral/90 rounded-lg text-sm"
-                    >
+                    <button onClick={() => viewFullProfile(m)} className="px-3 py-1.5 bg-coral rounded-lg text-sm">
                       View Profile
                     </button>
-                    <button
-                      onClick={() => openPhotoModal(m.id)}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm"
-                    >
+                    <button onClick={() => openPhotoModal(m.id)} className="px-3 py-1.5 bg-blue-600 rounded-lg text-sm">
                       Photos
                     </button>
                     <button
                       onClick={() => permanentDeleteMember(m.id, m.display_name)}
-                      className="px-3 py-1.5 bg-red-700 hover:bg-red-800 rounded-lg text-sm"
+                      className="px-3 py-1.5 bg-red-700 rounded-lg text-sm"
                     >
                       Permanent Delete
                     </button>
                   </div>
                 </div>
               ))}
-              {members.length === 0 && (
-                <p className="text-gray-400">No users found. Try changing the filter or check console for errors.</p>
-              )}
+              {members.length === 0 && <p className="text-gray-400">No users found.</p>}
             </div>
           </div>
         )}
 
-        {/* ===== FULL PROFILE ===== */}
+        {/* ===== FULL PROFILE VIEW (now with photos) ===== */}
         {activeTab === 'profile' && selectedMember && (
           <div>
             <button
@@ -575,6 +577,40 @@ function Admin() {
 
             <h2 className="text-2xl font-semibold mb-1">{selectedMember.display_name || 'No name'}</h2>
             <p className="text-gray-400 text-sm mb-6">ID: {selectedMember.id}</p>
+
+            {/* Photos in profile view */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold mb-3">Photos</h3>
+              <div className="flex flex-wrap gap-3">
+                {selectedMember.avatar_url && (
+                  <div className="relative">
+                    <img
+                      src={selectedMember.avatar_url}
+                      alt="Avatar"
+                      className="w-28 h-28 object-cover rounded-xl border-2 border-yellow-500"
+                    />
+                    <span className="absolute bottom-1 left-1 text-xs bg-yellow-600 px-1 rounded">Avatar</span>
+                  </div>
+                )}
+                {selectedMemberPhotos.map(p => (
+                  <img
+                    key={p.id}
+                    src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
+                    alt=""
+                    className="w-28 h-28 object-cover rounded-xl"
+                  />
+                ))}
+                {!selectedMember.avatar_url && selectedMemberPhotos.length === 0 && (
+                  <p className="text-gray-400">No photos</p>
+                )}
+              </div>
+              <button
+                onClick={() => openPhotoModal(selectedMember.id)}
+                className="mt-3 px-4 py-2 bg-blue-600 rounded-lg text-sm"
+              >
+                Manage Photos
+              </button>
+            </div>
 
             <div className="grid md:grid-cols-2 gap-6 mb-8">
               <div className="bg-navy-light rounded-2xl p-5 space-y-2">
@@ -610,7 +646,7 @@ function Admin() {
           </div>
         )}
 
-        {/* ===== SEEDS ===== */}
+        {/* ===== SEEDS (now with full admin buttons) ===== */}
         {activeTab === 'seeds' && (
           <div className="bg-navy-light rounded-2xl p-6">
             <div className="flex justify-between items-center mb-4">
@@ -630,10 +666,14 @@ function Admin() {
             ) : (
               <div className="space-y-3">
                 {seedProfiles.map(p => (
-                  <div key={p.id} className="flex justify-between items-center bg-navy p-3 rounded-lg gap-4">
+                  <div key={p.id} className="flex flex-wrap justify-between items-center bg-navy p-4 rounded-xl gap-4">
                     <div className="flex items-center gap-3">
-                      {p.avatar_url && (
-                        <img src={p.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
+                      {p.avatar_url ? (
+                        <img src={p.avatar_url} alt="" className="w-14 h-14 rounded-full object-cover border-2 border-yellow-500" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-full bg-gray-700 flex items-center justify-center text-xl">
+                          {p.display_name?.charAt(0) || '?'}
+                        </div>
                       )}
                       <div>
                         <p className="font-medium">{p.display_name}</p>
@@ -642,18 +682,24 @@ function Admin() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => viewFullProfile(p)}
+                        className="px-3 py-1.5 bg-coral rounded-lg text-sm"
+                      >
+                        View Profile
+                      </button>
                       <button
                         onClick={() => openPhotoModal(p.id)}
-                        className="text-sm text-blue-400 hover:text-blue-300"
+                        className="px-3 py-1.5 bg-blue-600 rounded-lg text-sm"
                       >
                         Photos
                       </button>
                       <button
-                        onClick={() => deleteSeed(p.id)}
-                        className="text-sm text-red-400 hover:text-red-300"
+                        onClick={() => permanentDeleteMember(p.id, p.display_name)}
+                        className="px-3 py-1.5 bg-red-700 rounded-lg text-sm"
                       >
-                        Delete
+                        Permanent Delete
                       </button>
                     </div>
                   </div>
@@ -698,7 +744,7 @@ function Admin() {
           <div>
             <p className="text-gray-400 mb-4">
               Total photos in storage: <strong className="text-white">{stats.photosCount}</strong>.
-              Use the Users or Seeds tab → “Photos” button to manage individual photos (including seed avatars).
+              Use Users or Seeds → “Photos” button to manage individual photos (including seed avatars).
             </p>
           </div>
         )}
@@ -715,31 +761,37 @@ function Admin() {
             onClick={e => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold">Manage Photos</h3>
+              <h3 className="text-xl font-semibold">
+                Photos – {photoModal.displayName}
+              </h3>
               <button onClick={() => setPhotoModal(null)} className="text-2xl leading-none">×</button>
             </div>
 
-            {/* Seed / Avatar picture */}
-            {photoModal.avatar_url && (
-              <div className="mb-4">
-                <p className="text-sm text-gray-400 mb-2">Main / Seed Avatar</p>
+            {/* Seed / Avatar */}
+            {photoModal.avatar_url ? (
+              <div className="mb-6">
+                <p className="text-sm text-yellow-400 mb-2 font-medium">Seed / Main Avatar</p>
                 <div className="relative inline-block">
                   <img
                     src={photoModal.avatar_url}
                     alt="Avatar"
-                    className="w-24 h-24 object-cover rounded-lg border-2 border-yellow-500"
+                    className="w-32 h-32 object-cover rounded-xl border-4 border-yellow-500"
                   />
                   <button
                     onClick={adminClearAvatar}
-                    className="absolute -top-2 -right-2 bg-red-600 text-white w-6 h-6 rounded-full text-sm"
-                    title="Remove seed avatar"
+                    className="absolute -top-3 -right-3 bg-red-600 hover:bg-red-700 text-white w-8 h-8 rounded-full text-lg font-bold shadow"
+                    title="Delete seed avatar"
                   >
                     ×
                   </button>
                 </div>
+                <p className="text-xs text-gray-400 mt-2">Click the red × to remove this seed picture</p>
               </div>
+            ) : (
+              <p className="text-gray-400 mb-4">No avatar / seed picture</p>
             )}
 
+            {/* Normal photos from storage */}
             <div className="flex flex-wrap gap-3 mb-4">
               {photoModal.photos.map(p => (
                 <div key={p.id} className="relative">
@@ -756,9 +808,6 @@ function Admin() {
                   </button>
                 </div>
               ))}
-              {photoModal.photos.length === 0 && !photoModal.avatar_url && (
-                <p className="text-gray-400">No photos yet.</p>
-              )}
             </div>
 
             {photoModal.photos.length < 6 && (
