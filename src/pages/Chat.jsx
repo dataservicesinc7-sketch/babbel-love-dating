@@ -62,17 +62,19 @@ function Chat() {
     return groups
   }
 
-  // Delete own message
+  // Delete any message in this match (own OR from the other person)
   const deleteMessage = async (messageId) => {
-    if (!window.confirm('Delete this message permanently?')) return
+    if (!window.confirm('Delete this message permanently? Both of you will no longer see it.')) return
     setDeletingId(messageId)
     const { error } = await supabase
       .from('messages')
       .delete()
       .eq('id', messageId)
-      .eq('sender_id', me.id)
+      .eq('match_id', matchId)   // safety: only messages belonging to this match
     if (!error) {
       setMessages(prev => prev.filter(m => m.id !== messageId))
+    } else {
+      alert('Could not delete: ' + error.message)
     }
     setDeletingId(null)
   }
@@ -101,7 +103,7 @@ function Chat() {
         configOverwrite: {
           startWithAudioMuted: false,
           startWithVideoMuted: false,
-          prejoinPageEnabled: false,          // skip the big conference pre-join screen
+          prejoinPageEnabled: false,
           disableModeratorIndicator: true,
           enableWelcomePage: false,
           enableClosePage: false,
@@ -488,16 +490,15 @@ function Chat() {
                     <p className="text-xs opacity-60">
                       {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
-                    {isMe && (
-                      <button
-                        onClick={() => deleteMessage(m.id)}
-                        disabled={deletingId === m.id}
-                        className="text-xs opacity-0 group-hover:opacity-100 transition-opacity ml-2 underline"
-                        title="Delete this message"
-                      >
-                        {deletingId === m.id ? '…' : 'Delete'}
-                      </button>
-                    )}
+                    {/* Delete button now available for ALL messages in the match */}
+                    <button
+                      onClick={() => deleteMessage(m.id)}
+                      disabled={deletingId === m.id}
+                      className="text-xs opacity-0 group-hover:opacity-100 transition-opacity ml-2 underline"
+                      title="Delete this message"
+                    >
+                      {deletingId === m.id ? '…' : 'Delete'}
+                    </button>
                   </div>
                 </div>
               )
