@@ -289,7 +289,7 @@ function Admin() {
     loadMembers()
   }
 
-  // ===== ONLY NEW: Clear avatar_url (external seed avatars) =====
+  // ===== ONLY NEW: Clear avatar_url =====
   const clearAvatarUrl = async (id) => {
     if (!confirm('Clear the external avatar for this seed?')) return
     const { error } = await supabase
@@ -317,7 +317,7 @@ function Admin() {
     setMessage('All seed avatars cleared.')
     loadSeeds()
   }
-  // ===== END of new avatar code =====
+  // ===== END new avatar code =====
 
   // ===== Photo management for any member =====
   const openPhotoModal = async (profileId) => {
@@ -432,7 +432,7 @@ function Admin() {
           </p>
         )}
 
-        {/* Tabs / Navigation */}
+        {/* Tabs / Navigation – only change: "members" now displays as "Users" */}
         <div className="flex flex-wrap gap-2 mb-8 border-b border-gray-700 pb-3">
           {['stats', 'members', 'reports', 'seeds', 'photos'].map(tab => (
             <button
@@ -442,7 +442,7 @@ function Admin() {
                 activeTab === tab || (activeTab === 'profile' && tab === 'members') ? 'bg-coral text-white' : 'bg-navy-light hover:bg-gray-700'
               }`}
             >
-              {tab}
+              {tab === 'members' ? 'Users' : tab}
             </button>
           ))}
         </div>
@@ -497,7 +497,7 @@ function Admin() {
           </div>
         )}
 
-        {/* ===== MEMBERS LIST ===== */}
+        {/* ===== USERS LIST (was members) ===== */}
         {activeTab === 'members' && !selectedMember && (
           <div>
             <div className="flex flex-wrap gap-3 mb-4">
@@ -666,13 +666,13 @@ function Admin() {
           </div>
         )}
 
-        {/* ===== SEEDS (original kept + only avatar clear added) ===== */}
+        {/* ===== SEEDS ===== */}
         {activeTab === 'seeds' && (
           <div className="bg-navy-light rounded-2xl p-6">
             <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
               <h2 className="text-xl font-semibold">Seed / Fake Profiles ({seedProfiles.length})</h2>
               <div className="flex gap-2">
-                {/* NEW: Clear all avatars button */}
+                {/* NEW: Clear All Seed Avatars */}
                 {seedProfiles.some(p => p.avatar_url) && (
                   <button
                     onClick={clearAllSeedAvatars}
@@ -712,7 +712,7 @@ function Admin() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      {/* NEW: Clear single avatar button */}
+                      {/* NEW: Clear single avatar */}
                       {p.avatar_url && (
                         <button
                           onClick={() => clearAvatarUrl(p.id)}
@@ -749,7 +749,7 @@ function Admin() {
           <div>
             <p className="text-gray-400 mb-4">
               Total photos in storage: <strong className="text-white">{stats.photosCount}</strong>.  
-              Use the Members tab → “Photos” button to view / upload / delete photos for any user.
+              Use the Users tab → “Photos” button to view / upload / delete photos for any user.
             </p>
           </div>
         )}
