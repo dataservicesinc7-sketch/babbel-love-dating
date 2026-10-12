@@ -83,7 +83,7 @@ function Admin() {
     try {
       let query = supabase
         .from('profiles')
-        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for, avatar_url')
+        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for')
         .order('created_at', { ascending: false })
         .limit(300)
 
@@ -110,7 +110,7 @@ function Admin() {
   const loadSeeds = async () => {
     const { data } = await supabase
       .from('profiles')
-      .select('id, display_name, city, country, gender, relationship_goal, is_seed, avatar_url, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for')
+      .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at')
       .eq('is_seed', true)
       .order('created_at', { ascending: false })
     setSeedProfiles(data || [])
@@ -123,7 +123,6 @@ function Admin() {
     } catch (_) { setReports([]) }
   }
 
-  // ===== Shared actions (used by both Users and Seeds) =====
   const suspendMember = async (id, currentlySuspended) => {
     const action = currentlySuspended ? 'unsuspend' : 'suspend'
     if (!confirm(`Really ${action} this account?`)) return
@@ -167,22 +166,6 @@ function Admin() {
       setSelectedMember(null)
       loadMembers(); loadSeeds(); loadStats()
     } catch (err) { setMessage('Error: ' + err.message) }
-  }
-
-  const clearAvatarUrl = async (id) => {
-    if (!confirm('Clear the external avatar for this account?')) return
-    const { error } = await supabase.from('profiles').update({ avatar_url: null }).eq('id', id)
-    if (error) { setMessage('Error: ' + error.message); return }
-    setMessage('Avatar cleared.')
-    loadMembers(); loadSeeds()
-  }
-
-  const clearAllSeedAvatars = async () => {
-    if (!confirm(`Clear avatar on ALL ${seedProfiles.length} seed profiles?`)) return
-    const { error } = await supabase.from('profiles').update({ avatar_url: null }).eq('is_seed', true)
-    if (error) { setMessage('Error: ' + error.message); return }
-    setMessage('All seed avatars cleared.')
-    loadSeeds(); loadMembers()
   }
 
   const deleteAllSeeds = async () => {
@@ -243,7 +226,6 @@ function Admin() {
     setActiveTab('profile')
   }
 
-  // Helper to render the action buttons (used by both Users and Seeds)
   const renderActionButtons = (m) => (
     <div className="flex flex-wrap gap-2">
       <button onClick={() => viewFullProfile(m)} className="px-3 py-1.5 bg-coral hover:bg-coral/90 rounded-lg text-sm">
@@ -252,11 +234,6 @@ function Admin() {
       <button onClick={() => openPhotoModal(m.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm">
         Photos
       </button>
-      {m.avatar_url && (
-        <button onClick={() => clearAvatarUrl(m.id)} className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 rounded-lg text-sm">
-          Clear Avatar
-        </button>
-      )}
       <button onClick={() => suspendMember(m.id, m.is_suspended)} className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm">
         {m.is_suspended ? 'Unsuspend' : 'Suspend'}
       </button>
@@ -313,7 +290,6 @@ function Admin() {
           </p>
         )}
 
-        {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-8 border-b border-gray-700 pb-3">
           {['stats', 'members', 'reports', 'seeds', 'photos'].map(tab => (
             <button
@@ -335,7 +311,6 @@ function Admin() {
           ))}
         </div>
 
-        {/* STATS */}
         {activeTab === 'stats' && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
             <div className="bg-navy-light p-5 rounded-2xl"><p className="text-3xl font-bold text-coral">{stats.totalMembers}</p><p className="text-sm text-gray-400">Total Members</p></div>
@@ -352,7 +327,6 @@ function Admin() {
           </div>
         )}
 
-        {/* USERS TAB */}
         {activeTab === 'members' && !selectedMember && (
           <div>
             <div className="flex flex-wrap gap-3 mb-4">
@@ -370,18 +344,15 @@ function Admin() {
             <div className="space-y-3">
               {members.map(m => (
                 <div key={m.id} className="bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    {m.avatar_url && <img src={m.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />}
-                    <div>
-                      <p className="font-medium">
-                        {m.display_name || 'No name'}
-                        {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
-                        {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
-                        {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
-                      </p>
-                      <p className="text-sm text-gray-400">{m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}</p>
-                      <p className="text-xs text-gray-500">Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</p>
-                    </div>
+                  <div>
+                    <p className="font-medium">
+                      {m.display_name || 'No name'}
+                      {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
+                      {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
+                      {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
+                    </p>
+                    <p className="text-sm text-gray-400">{m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}</p>
+                    <p className="text-xs text-gray-500">Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</p>
                   </div>
                   {renderActionButtons(m)}
                 </div>
@@ -391,7 +362,6 @@ function Admin() {
           </div>
         )}
 
-        {/* FULL PROFILE VIEW */}
         {activeTab === 'profile' && selectedMember && (
           <div>
             <button onClick={() => { setSelectedMember(null); setActiveTab('members') }} className="text-coral mb-4 text-sm">← Back to Users</button>
@@ -399,12 +369,6 @@ function Admin() {
             <p className="text-gray-400 text-sm mb-6">ID: {selectedMember.id}</p>
             <div className="grid md:grid-cols-2 gap-6 mb-8">
               <div className="bg-navy-light rounded-2xl p-5 space-y-2">
-                {selectedMember.avatar_url && (
-                  <div className="mb-3">
-                    <img src={selectedMember.avatar_url} alt="" className="w-24 h-24 rounded-full object-cover" />
-                    <button onClick={() => clearAvatarUrl(selectedMember.id)} className="mt-2 text-sm text-purple-400 underline">Clear Avatar</button>
-                  </div>
-                )}
                 <p><span className="text-gray-400">Gender:</span> {selectedMember.gender || '—'}</p>
                 <p><span className="text-gray-400">Looking for:</span> {selectedMember.looking_for || '—'}</p>
                 <p><span className="text-gray-400">Goal:</span> {selectedMember.relationship_goal || '—'}</p>
@@ -424,7 +388,6 @@ function Admin() {
           </div>
         )}
 
-        {/* REPORTS */}
         {activeTab === 'reports' && (
           <div>
             <h2 className="text-xl font-semibold mb-4">Reports Queue</h2>
@@ -447,23 +410,15 @@ function Admin() {
           </div>
         )}
 
-        {/* SEEDS TAB – now has THE SAME buttons as Users */}
         {activeTab === 'seeds' && (
           <div className="bg-navy-light rounded-2xl p-6">
             <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
               <h2 className="text-xl font-semibold">Seed / Fake Profiles ({seedProfiles.length})</h2>
-              <div className="flex gap-2">
-                {seedProfiles.some(p => p.avatar_url) && (
-                  <button onClick={clearAllSeedAvatars} className="px-4 py-2 bg-purple-700 hover:bg-purple-800 rounded-full text-sm">
-                    Clear All Seed Avatars
-                  </button>
-                )}
-                {seedProfiles.length > 0 && (
-                  <button onClick={deleteAllSeeds} className="px-4 py-2 bg-red-700 hover:bg-red-800 rounded-full text-sm">
-                    Delete All Seeds
-                  </button>
-                )}
-              </div>
+              {seedProfiles.length > 0 && (
+                <button onClick={deleteAllSeeds} className="px-4 py-2 bg-red-700 hover:bg-red-800 rounded-full text-sm">
+                  Delete All Seeds
+                </button>
+              )}
             </div>
 
             {seedProfiles.length === 0 ? (
@@ -472,21 +427,12 @@ function Admin() {
               <div className="space-y-3">
                 {seedProfiles.map(p => (
                   <div key={p.id} className="bg-navy p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      {p.avatar_url ? (
-                        <img src={p.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
-                      ) : (
-                        <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center text-xs text-gray-400">No photo</div>
-                      )}
-                      <div>
-                        <p className="font-medium">
-                          {p.display_name}
-                          <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>
-                          {p.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
-                          {p.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
-                        </p>
-                        <p className="text-sm text-gray-400">{p.gender} · {formatLocation(p.city, p.country)} · {p.relationship_goal}</p>
-                      </div>
+                    <div>
+                      <p className="font-medium">
+                        {p.display_name}
+                        <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>
+                      </p>
+                      <p className="text-sm text-gray-400">{p.gender} · {formatLocation(p.city, p.country)} · {p.relationship_goal}</p>
                     </div>
                     {renderActionButtons(p)}
                   </div>
@@ -496,7 +442,6 @@ function Admin() {
           </div>
         )}
 
-        {/* PHOTOS overview */}
         {activeTab === 'photos' && (
           <div>
             <p className="text-gray-400 mb-4">
@@ -507,7 +452,6 @@ function Admin() {
         )}
       </main>
 
-      {/* Photo modal */}
       {photoModal && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setPhotoModal(null)}>
           <div className="bg-navy-light rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
