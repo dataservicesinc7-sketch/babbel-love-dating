@@ -35,16 +35,16 @@ function Admin() {
   const [members, setMembers] = useState([])
   const [memberFilter, setMemberFilter] = useState('all')
   const [memberSearch, setMemberSearch] = useState('')
-  const [selectedMember, setSelectedMember] = useState(null)
+  const [selectedMember, setSelectedMember] = useState(null) // for full profile view
 
-  // Seed profiles
+  // Seed profiles (kept from original)
   const [seedProfiles, setSeedProfiles] = useState([])
 
-  // Reports
+  // Reports (assumes a reports table exists or falls back gracefully)
   const [reports, setReports] = useState([])
 
   // Photo edit modal
-  const [photoModal, setPhotoModal] = useState(null)
+  const [photoModal, setPhotoModal] = useState(null) // { profileId, photos: [] }
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
   useEffect(() => {
@@ -105,6 +105,7 @@ function Admin() {
           .not('gender', 'ilike', 'woman')
       ])
 
+      // Open reports (graceful if table missing)
       let openReports = 0
       try {
         const { count } = await supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'open')
@@ -134,7 +135,7 @@ function Admin() {
     try {
       let query = supabase
         .from('profiles')
-        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for, avatar_url')
+        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for')
         .order('created_at', { ascending: false })
         .limit(300)
 
@@ -243,6 +244,7 @@ function Admin() {
     if (!confirm(`PERMANENTLY delete ${name || 'this member'} and all their photos/messages? This cannot be undone.`)) return
     if (!confirm('Final confirmation – this is irreversible.')) return
     try {
+      // Delete photos from storage
       const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
       if (photos?.length) {
         const paths = photos.map(p => p.storage_path).filter(Boolean)
@@ -260,41 +262,7 @@ function Admin() {
     }
   }
 
-  // ===== Clear avatar_url (the external seed avatars) =====
-  const clearAvatarUrl = async (id) => {
-    if (!confirm('Clear the external avatar URL for this profile? (The real photos table is not affected.)')) return
-    const { error } = await supabase
-      .from('profiles')
-      .update({ avatar_url: null })
-      .eq('id', id)
-    if (error) {
-      setMessage('Error: ' + error.message)
-      return
-    }
-    setMessage('Avatar URL cleared.')
-    loadSeeds()
-    loadMembers()
-    if (selectedMember?.id === id) {
-      setSelectedMember(prev => ({ ...prev, avatar_url: null }))
-    }
-  }
-
-  const clearAllSeedAvatars = async () => {
-    if (!confirm(`Clear avatar_url on ALL ${seedProfiles.length} seed profiles?`)) return
-    const { error } = await supabase
-      .from('profiles')
-      .update({ avatar_url: null })
-      .eq('is_seed', true)
-    if (error) {
-      setMessage('Error: ' + error.message)
-      return
-    }
-    setMessage('All seed avatar URLs cleared.')
-    loadSeeds()
-    loadMembers()
-  }
-
-  // ===== Seed actions =====
+  // ===== Seed actions (original kept) =====
   const deleteSeed = async (id) => {
     if (!confirm('Delete this seed profile permanently?')) return
     const { error } = await supabase.from('profiles').delete().eq('id', id)
@@ -321,6 +289,36 @@ function Admin() {
     loadMembers()
   }
 
+  // ===== ONLY NEW: Clear avatar_url (external seed avatars) =====
+  const clearAvatarUrl = async (id) => {
+    if (!confirm('Clear the external avatar for this seed?')) return
+    const { error } = await supabase
+      .from('profiles')
+      .update({ avatar_url: null })
+      .eq('id', id)
+    if (error) {
+      setMessage('Error: ' + error.message)
+      return
+    }
+    setMessage('Avatar cleared.')
+    loadSeeds()
+  }
+
+  const clearAllSeedAvatars = async () => {
+    if (!confirm(`Clear avatar on ALL ${seedProfiles.length} seed profiles?`)) return
+    const { error } = await supabase
+      .from('profiles')
+      .update({ avatar_url: null })
+      .eq('is_seed', true)
+    if (error) {
+      setMessage('Error: ' + error.message)
+      return
+    }
+    setMessage('All seed avatars cleared.')
+    loadSeeds()
+  }
+  // ===== END of new avatar code =====
+
   // ===== Photo management for any member =====
   const openPhotoModal = async (profileId) => {
     const { data: photoRows } = await supabase
@@ -328,17 +326,7 @@ function Admin() {
       .select('*')
       .eq('profile_id', profileId)
       .order('sort_order')
-    // also fetch current avatar_url so we can show / clear it
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('avatar_url')
-      .eq('id', profileId)
-      .maybeSingle()
-    setPhotoModal({
-      profileId,
-      photos: photoRows || [],
-      avatar_url: profile?.avatar_url || null
-    })
+    setPhotoModal({ profileId, photos: photoRows || [] })
   }
 
   const adminDeletePhoto = async (photoId, storagePath) => {
@@ -400,6 +388,7 @@ function Admin() {
     }
   }
 
+  // View full profile
   const viewFullProfile = async (member) => {
     setSelectedMember(member)
     setActiveTab('profile')
@@ -443,7 +432,7 @@ function Admin() {
           </p>
         )}
 
-        {/* Tabs */}
+        {/* Tabs / Navigation */}
         <div className="flex flex-wrap gap-2 mb-8 border-b border-gray-700 pb-3">
           {['stats', 'members', 'reports', 'seeds', 'photos'].map(tab => (
             <button
@@ -453,7 +442,7 @@ function Admin() {
                 activeTab === tab || (activeTab === 'profile' && tab === 'members') ? 'bg-coral text-white' : 'bg-navy-light hover:bg-gray-700'
               }`}
             >
-              {tab === 'members' ? 'Users' : tab}
+              {tab}
             </button>
           ))}
         </div>
@@ -508,7 +497,7 @@ function Admin() {
           </div>
         )}
 
-        {/* ===== USERS / MEMBERS LIST ===== */}
+        {/* ===== MEMBERS LIST ===== */}
         {activeTab === 'members' && !selectedMember && (
           <div>
             <div className="flex flex-wrap gap-3 mb-4">
@@ -537,51 +526,59 @@ function Admin() {
             <div className="space-y-3">
               {members.map(m => (
                 <div key={m.id} className="bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    {m.avatar_url && (
-                      <img src={m.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />
-                    )}
-                    <div>
-                      <p className="font-medium">
-                        {m.display_name || 'No name'}
-                        {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
-                        {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
-                        {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
-                      </p>
-                      <p className="text-sm text-gray-400">
-                        {m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
-                        {m.last_seen && ` · Last seen ${new Date(m.last_seen).toLocaleString()}`}
-                      </p>
-                    </div>
+                  <div>
+                    <p className="font-medium">
+                      {m.display_name || 'No name'}
+                      {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
+                      {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
+                      {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
+                    </p>
+                    <p className="text-sm text-gray-400">
+                      {m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                      {m.last_seen && ` · Last seen ${new Date(m.last_seen).toLocaleString()}`}
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => viewFullProfile(m)} className="px-3 py-1.5 bg-coral hover:bg-coral/90 rounded-lg text-sm">
+                    <button
+                      onClick={() => viewFullProfile(m)}
+                      className="px-3 py-1.5 bg-coral hover:bg-coral/90 rounded-lg text-sm"
+                    >
                       View Profile
                     </button>
-                    <button onClick={() => openPhotoModal(m.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm">
+                    <button
+                      onClick={() => openPhotoModal(m.id)}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm"
+                    >
                       Photos
                     </button>
-                    {m.avatar_url && (
-                      <button onClick={() => clearAvatarUrl(m.id)} className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 rounded-lg text-sm">
-                        Clear Avatar
-                      </button>
-                    )}
-                    <button onClick={() => suspendMember(m.id, m.is_suspended)} className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm">
+                    <button
+                      onClick={() => suspendMember(m.id, m.is_suspended)}
+                      className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm"
+                    >
                       {m.is_suspended ? 'Unsuspend' : 'Suspend'}
                     </button>
                     {m.is_active === false ? (
-                      <button onClick={() => restoreMember(m.id)} className="px-3 py-1.5 bg-green-700 hover:bg-green-800 rounded-lg text-sm">
+                      <button
+                        onClick={() => restoreMember(m.id)}
+                        className="px-3 py-1.5 bg-green-700 hover:bg-green-800 rounded-lg text-sm"
+                      >
                         Restore
                       </button>
                     ) : (
-                      <button onClick={() => deactivateMember(m.id)} className="px-3 py-1.5 bg-orange-700 hover:bg-orange-800 rounded-lg text-sm">
+                      <button
+                        onClick={() => deactivateMember(m.id)}
+                        className="px-3 py-1.5 bg-orange-700 hover:bg-orange-800 rounded-lg text-sm"
+                      >
                         Deactivate
                       </button>
                     )}
-                    <button onClick={() => permanentDeleteMember(m.id, m.display_name)} className="px-3 py-1.5 bg-red-700 hover:bg-red-800 rounded-lg text-sm">
+                    <button
+                      onClick={() => permanentDeleteMember(m.id, m.display_name)}
+                      className="px-3 py-1.5 bg-red-700 hover:bg-red-800 rounded-lg text-sm"
+                    >
                       Permanent Delete
                     </button>
                   </div>
@@ -607,17 +604,6 @@ function Admin() {
 
             <div className="grid md:grid-cols-2 gap-6 mb-8">
               <div className="bg-navy-light rounded-2xl p-5 space-y-2">
-                {selectedMember.avatar_url && (
-                  <div className="mb-3">
-                    <img src={selectedMember.avatar_url} alt="" className="w-24 h-24 rounded-full object-cover" />
-                    <button
-                      onClick={() => clearAvatarUrl(selectedMember.id)}
-                      className="mt-2 text-sm text-purple-400 underline"
-                    >
-                      Clear external avatar
-                    </button>
-                  </div>
-                )}
                 <p><span className="text-gray-400">Gender:</span> {selectedMember.gender || '—'}</p>
                 <p><span className="text-gray-400">Looking for:</span> {selectedMember.looking_for || '—'}</p>
                 <p><span className="text-gray-400">Relationship goal:</span> {selectedMember.relationship_goal || '—'}</p>
@@ -635,9 +621,6 @@ function Admin() {
                 <h3 className="text-lg font-semibold mb-3">Quick Actions</h3>
                 <div className="flex flex-wrap gap-2">
                   <button onClick={() => openPhotoModal(selectedMember.id)} className="px-4 py-2 bg-blue-600 rounded-lg text-sm">Manage Photos</button>
-                  {selectedMember.avatar_url && (
-                    <button onClick={() => clearAvatarUrl(selectedMember.id)} className="px-4 py-2 bg-purple-700 rounded-lg text-sm">Clear Avatar</button>
-                  )}
                   <button onClick={() => suspendMember(selectedMember.id, selectedMember.is_suspended)} className="px-4 py-2 bg-yellow-600 rounded-lg text-sm">
                     {selectedMember.is_suspended ? 'Unsuspend' : 'Suspend'}
                   </button>
@@ -683,12 +666,13 @@ function Admin() {
           </div>
         )}
 
-        {/* ===== SEEDS ===== */}
+        {/* ===== SEEDS (original kept + only avatar clear added) ===== */}
         {activeTab === 'seeds' && (
           <div className="bg-navy-light rounded-2xl p-6">
             <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
               <h2 className="text-xl font-semibold">Seed / Fake Profiles ({seedProfiles.length})</h2>
               <div className="flex gap-2">
+                {/* NEW: Clear all avatars button */}
                 {seedProfiles.some(p => p.avatar_url) && (
                   <button
                     onClick={clearAllSeedAvatars}
@@ -728,6 +712,7 @@ function Admin() {
                       </div>
                     </div>
                     <div className="flex gap-2">
+                      {/* NEW: Clear single avatar button */}
                       {p.avatar_url && (
                         <button
                           onClick={() => clearAvatarUrl(p.id)}
@@ -764,8 +749,7 @@ function Admin() {
           <div>
             <p className="text-gray-400 mb-4">
               Total photos in storage: <strong className="text-white">{stats.photosCount}</strong>.  
-              Use the Users tab → “Photos” button to view / upload / delete photos for any user.
-              External seed avatars (avatar_url) can be cleared from the Seeds or Users tab.
+              Use the Members tab → “Photos” button to view / upload / delete photos for any user.
             </p>
           </div>
         )}
@@ -779,25 +763,6 @@ function Admin() {
               <h3 className="text-xl font-semibold">Manage Photos</h3>
               <button onClick={() => setPhotoModal(null)} className="text-2xl leading-none">×</button>
             </div>
-
-            {/* External avatar (seed only) */}
-            {photoModal.avatar_url && (
-              <div className="mb-5 p-3 bg-navy rounded-xl">
-                <p className="text-sm text-gray-400 mb-2">External avatar (from seed creation)</p>
-                <div className="flex items-center gap-3">
-                  <img src={photoModal.avatar_url} alt="" className="w-20 h-20 rounded-lg object-cover" />
-                  <button
-                    onClick={() => {
-                      clearAvatarUrl(photoModal.profileId)
-                      setPhotoModal(prev => ({ ...prev, avatar_url: null }))
-                    }}
-                    className="px-3 py-1.5 bg-purple-700 rounded-lg text-sm"
-                  >
-                    Clear this avatar
-                  </button>
-                </div>
-              </div>
-            )}
 
             <div className="flex flex-wrap gap-3 mb-4">
               {photoModal.photos.map(p => (
@@ -815,9 +780,7 @@ function Admin() {
                   </button>
                 </div>
               ))}
-              {photoModal.photos.length === 0 && !photoModal.avatar_url && (
-                <p className="text-gray-400">No photos yet.</p>
-              )}
+              {photoModal.photos.length === 0 && <p className="text-gray-400">No photos yet.</p>}
             </div>
 
             {photoModal.photos.length < 6 && (
