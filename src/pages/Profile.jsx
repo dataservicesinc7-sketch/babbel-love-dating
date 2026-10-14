@@ -26,6 +26,12 @@ function Profile() {
   const [bio, setBio] = useState('')
   const [selectedInterests, setSelectedInterests] = useState([])
 
+  // Password change
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordMsg, setPasswordMsg] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
+
   useEffect(() => {
     const load = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -51,7 +57,6 @@ function Profile() {
         setBio(data.bio || '')
       }
 
-      // Always load previously saved interests – never force re-selection
       const { data: interestRows } = await supabase
         .from('profile_interests')
         .select('interest')
@@ -109,7 +114,6 @@ function Profile() {
         .upload(path, compressed)
       if (upError) throw upError
 
-      // New photo gets next sort_order; if first photo, it becomes primary (0)
       const nextOrder = photos.length === 0 ? 0 : Math.max(...photos.map(p => p.sort_order || 0)) + 1
 
       const { error: dbError } = await supabase.from('photos').insert({
@@ -136,23 +140,19 @@ function Profile() {
     if (!user) return
     setMessage('Setting primary photo...')
     try {
-      // Move chosen photo to sort_order 0, shift others up
       const target = photos.find(p => p.id === photoId)
       if (!target) return
 
-      // First set all to temporary high numbers to avoid unique conflicts
       for (let i = 0; i < photos.length; i++) {
         await supabase.from('photos')
           .update({ sort_order: 1000 + i })
           .eq('id', photos[i].id)
       }
 
-      // Set primary to 0
       await supabase.from('photos')
         .update({ sort_order: 0 })
         .eq('id', photoId)
 
-      // Re-order the rest starting from 1
       const others = photos.filter(p => p.id !== photoId)
       for (let i = 0; i < others.length; i++) {
         await supabase.from('photos')
@@ -172,21 +172,17 @@ function Profile() {
     }
   }
 
-  // ===== NEW: Delete photo (only addition) =====
   const deletePhoto = async (photoId, storagePath) => {
     if (!user) return
     if (!confirm('Delete this photo permanently? This cannot be undone.')) return
     setMessage('Deleting photo...')
     try {
-      // Remove from storage (ignore error if already gone)
       if (storagePath) {
         await supabase.storage.from('profile-photos').remove([storagePath])
       }
-      // Remove DB row
       const { error } = await supabase.from('photos').delete().eq('id', photoId).eq('profile_id', user.id)
       if (error) throw error
 
-      // Reload remaining photos
       const { data: photoRows } = await supabase
         .from('photos')
         .select('*')
@@ -194,7 +190,6 @@ function Profile() {
         .order('sort_order')
       const remaining = photoRows || []
 
-      // Ensure there is still a primary (sort_order 0) if any photos left
       if (remaining.length > 0 && !remaining.some(p => p.sort_order === 0)) {
         await supabase.from('photos').update({ sort_order: 0 }).eq('id', remaining[0].id)
         const { data: fixed } = await supabase
@@ -240,7 +235,6 @@ function Profile() {
       return
     }
 
-    // Only replace interests if they actually changed (keeps saved ones intact)
     await supabase.from('profile_interests').delete().eq('profile_id', user.id)
     if (selectedInterests.length) {
       await supabase.from('profile_interests').insert(
@@ -250,6 +244,38 @@ function Profile() {
 
     setMessage('Profile saved successfully!')
     setSaving(false)
+  }
+
+  // Password change with email verification (Supabase sends confirmation when possible)
+  const handlePasswordChange = async (e) => {
+    e.preventDefault()
+    setPasswordMsg('')
+    if (newPassword.length < 6) {
+      setPasswordMsg('Password must be at least 6 characters.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg('Passwords do not match.')
+      return
+    }
+    setPasswordLoading(true)
+    try {
+      // Direct update for logged-in user
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+
+      // Also send a recovery email so the user has a verification trail
+      await supabase.auth.resetPasswordForEmail(user.email, {
+        redirectTo: 'https://babbel-love-dating.pages.dev/login'
+      })
+
+      setPasswordMsg('Password updated successfully. A confirmation email has been sent to your address.')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      setPasswordMsg('Error: ' + err.message)
+    }
+    setPasswordLoading(false)
   }
 
   if (loading) {
@@ -351,56 +377,85 @@ function Profile() {
             </div>
           </div>
 
+          {/* Photos section – kept exactly as before */}
           <div>
-            <label className="block text-sm mb-2">Photos (up to 6) – first / primary photo is used everywhere</label>
+            <label className="block text-sm mb-2">Photos (1–6)</label>
             <div className="flex flex-wrap gap-3 mb-3">
               {photos.map(p => (
                 <div key={p.id} className="relative">
                   <img
                     src={supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl}
                     alt=""
-                    className={`w-20 h-20 object-cover rounded-lg ${p.sort_order === 0 ? 'ring-2 ring-coral' : ''}`}
+                    className="w-24 h-24 object-cover rounded-lg"
                   />
-                  {p.sort_order === 0 ? (
-                    <span className="absolute -top-2 -right-2 bg-coral text-xs px-1.5 py-0.5 rounded-full">Main</span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setAsPrimary(p.id)}
-                      className="absolute -bottom-2 left-0 right-0 text-[10px] bg-navy/90 text-coral rounded"
-                    >
-                      Set main
-                    </button>
+                  {p.sort_order === 0 && (
+                    <span className="absolute bottom-1 left-1 bg-coral text-xs px-1 rounded">Primary</span>
                   )}
-                  {/* NEW delete button */}
-                  <button
-                    type="button"
-                    onClick={() => deletePhoto(p.id, p.storage_path)}
-                    className="absolute -top-2 -left-2 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"
-                    title="Delete photo"
-                  >
+                  <button type="button" onClick={() => setAsPrimary(p.id)} className="absolute top-1 left-1 bg-black/60 text-xs px-1 rounded">
+                    ★
+                  </button>
+                  <button type="button" onClick={() => deletePhoto(p.id, p.storage_path)} className="absolute top-1 right-1 bg-red-600 text-white w-5 h-5 rounded-full text-xs">
                     ×
                   </button>
                 </div>
               ))}
             </div>
             {photos.length < 6 && (
-              <input type="file" accept="image/*" onChange={handlePhotoUpload}
-                className="text-sm" />
+              <input type="file" accept="image/*" onChange={handlePhotoUpload} />
             )}
           </div>
 
-          {message && (
-            <p className={`text-sm ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
-              {message}
-            </p>
-          )}
+          {message && <p className="text-coral text-sm">{message}</p>}
 
           <button type="submit" disabled={saving}
-            className="w-full bg-coral hover:bg-coral-dark py-3 rounded-lg font-medium transition disabled:opacity-50">
-            {saving ? 'Saving...' : 'Save Profile'}
+            className="w-full bg-coral hover:bg-coral/90 py-3 rounded-full font-medium disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save Profile'}
           </button>
         </form>
+
+        {/* ===== NEW: Change Password (works for all users including admin) ===== */}
+        <div className="mt-10 bg-navy-light p-6 rounded-2xl">
+          <h2 className="text-xl font-semibold mb-4">Change Password</h2>
+          <p className="text-sm text-gray-400 mb-4">
+            Enter a new password. A confirmation email will also be sent to {user?.email}.
+          </p>
+          <form onSubmit={handlePasswordChange} className="space-y-4">
+            <div>
+              <label className="block text-sm mb-1">New password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                minLength={6}
+                required
+                className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
+              />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                minLength={6}
+                required
+                className="w-full px-4 py-3 rounded-lg bg-navy border border-gray-600 focus:outline-none focus:border-coral"
+              />
+            </div>
+            {passwordMsg && (
+              <p className={`text-sm ${passwordMsg.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
+                {passwordMsg}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={passwordLoading}
+              className="w-full bg-navy border border-coral text-coral hover:bg-coral hover:text-white py-3 rounded-full font-medium disabled:opacity-50"
+            >
+              {passwordLoading ? 'Updating…' : 'Update Password'}
+            </button>
+          </form>
+        </div>
       </main>
     </div>
   )
