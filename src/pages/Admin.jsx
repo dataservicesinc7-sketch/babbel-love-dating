@@ -25,6 +25,7 @@ function Admin() {
   const [memberFilter, setMemberFilter] = useState('all')
   const [memberSearch, setMemberSearch] = useState('')
   const [selectedMember, setSelectedMember] = useState(null)
+  const [selectedMemberPhotos, setSelectedMemberPhotos] = useState([]) // photos for View Profile
 
   // bulk selection
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -83,8 +84,7 @@ function Admin() {
     } catch (err) { console.error(err) }
   }
 
-  // FIXED: use select('*') so missing columns never cause 400
-  // Immediately loads ALL users (real + seed)
+  // Always use select('*') so missing columns never cause 400
   const loadMembers = async () => {
     try {
       let query = supabase
@@ -125,11 +125,12 @@ function Admin() {
   }
 
   const loadSeeds = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('is_seed', true)
       .order('created_at', { ascending: false })
+    if (error) console.error('loadSeeds error:', error)
     setSeedProfiles(data || [])
   }
 
@@ -138,6 +139,24 @@ function Admin() {
       const { data } = await supabase.from('reports').select('*').order('created_at', { ascending: false }).limit(100)
       setReports(data || [])
     } catch (_) { setReports([]) }
+  }
+
+  // Load photos when viewing a full profile
+  const loadMemberPhotos = async (profileId, avatarUrl) => {
+    const { data: photoRows } = await supabase
+      .from('photos')
+      .select('*')
+      .eq('profile_id', profileId)
+      .order('sort_order')
+    const urls = (photoRows || []).map(p =>
+      supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl
+    )
+    // Fallback to seed avatar_url if no uploaded photos
+    if (urls.length === 0 && avatarUrl) {
+      setSelectedMemberPhotos([avatarUrl])
+    } else {
+      setSelectedMemberPhotos(urls)
+    }
   }
 
   const suspendMember = async (id, currentlySuspended) => {
@@ -172,17 +191,71 @@ function Admin() {
     if (!confirm(`PERMANENTLY delete ${name || 'this account'} and all photos? This cannot be undone.`)) return
     if (!confirm('Final confirmation – irreversible.')) return
     try {
+      // 1. Remove photos from storage + table
       const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
       if (photos?.length) {
         const paths = photos.map(p => p.storage_path).filter(Boolean)
         if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
       }
       await supabase.from('photos').delete().eq('profile_id', id)
-      await supabase.from('profiles').delete().eq('id', id)
+
+      // 2. Delete the profile
+      const { error } = await supabase.from('profiles').delete().eq('id', id)
+      if (error) {
+        setMessage('Could not delete profile (RLS may be blocking): ' + error.message)
+        return
+      }
       setMessage('Account permanently deleted.')
       setSelectedMember(null)
+      setSelectedMemberPhotos([])
       loadMembers(); loadSeeds(); loadStats()
     } catch (err) { setMessage('Error: ' + err.message) }
+  }
+
+  // FIXED: Delete all seeds + their photos, then force refresh both lists
+  const deleteAllSeeds = async () => {
+    if (!confirm(`Delete ALL ${seedProfiles.length} seed profiles and their photos? This cannot be undone.`)) return
+    if (seedProfiles.length === 0) {
+      setMessage('No seed profiles found.')
+      return
+    }
+
+    setMessage('Deleting seeds… please wait')
+    let deleted = 0
+    let errors = []
+
+    for (const seed of seedProfiles) {
+      try {
+        // Remove photos first
+        const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', seed.id)
+        if (photos?.length) {
+          const paths = photos.map(p => p.storage_path).filter(Boolean)
+          if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
+        }
+        await supabase.from('photos').delete().eq('profile_id', seed.id)
+
+        // Delete the profile row
+        const { error } = await supabase.from('profiles').delete().eq('id', seed.id)
+        if (error) {
+          errors.push(`${seed.display_name || seed.id}: ${error.message}`)
+        } else {
+          deleted++
+        }
+      } catch (err) {
+        errors.push(`${seed.display_name || seed.id}: ${err.message}`)
+      }
+    }
+
+    // Force refresh both lists
+    await loadSeeds()
+    await loadMembers()
+    await loadStats()
+
+    if (errors.length > 0) {
+      setMessage(`Deleted ${deleted} seeds. Some failed (usually RLS): ${errors.slice(0, 3).join(' | ')}`)
+    } else {
+      setMessage(`Successfully deleted ${deleted} seed profile(s).`)
+    }
   }
 
   // bulk helpers
@@ -247,15 +320,6 @@ function Admin() {
     loadMembers(); loadSeeds(); loadStats()
   }
 
-  const deleteAllSeeds = async () => {
-    if (!confirm(`Delete ALL ${seedProfiles.length} seed profiles? This cannot be undone.`)) return
-    const { error } = await supabase.from('profiles').delete().eq('is_seed', true)
-    if (error) { setMessage('Error: ' + error.message); return }
-    setSeedProfiles([])
-    setMessage('All seed profiles deleted.')
-    loadStats(); loadMembers()
-  }
-
   const openPhotoModal = async (profileId) => {
     const { data: photoRows } = await supabase.from('photos').select('*').eq('profile_id', profileId).order('sort_order')
     setPhotoModal({ profileId, photos: photoRows || [] })
@@ -300,9 +364,11 @@ function Admin() {
     } catch (err) { setMessage('Error: ' + err.message) }
   }
 
-  const viewFullProfile = (member) => {
+  const viewFullProfile = async (member) => {
     setSelectedMember(member)
     setActiveTab('profile')
+    setSelectedMemberPhotos([]) // clear while loading
+    await loadMemberPhotos(member.id, member.avatar_url)
   }
 
   const renderActionButtons = (m) => (
@@ -376,6 +442,7 @@ function Admin() {
               onClick={() => {
                 setActiveTab(tab)
                 setSelectedMember(null)
+                setSelectedMemberPhotos([])
                 if (tab === 'members') loadMembers()
                 if (tab === 'seeds') loadSeeds()
               }}
@@ -406,7 +473,7 @@ function Admin() {
           </div>
         )}
 
-        {/* USERS TAB – shows the full list immediately */}
+        {/* USERS TAB */}
         {activeTab === 'members' && !selectedMember && (
           <div>
             <div className="flex flex-wrap gap-3 mb-4 items-center">
@@ -436,10 +503,9 @@ function Admin() {
             </div>
 
             <p className="text-sm text-gray-400 mb-3">
-              Showing {members.length} user{members.length !== 1 ? 's' : ''} (registered + seed accounts)
+              Showing {members.length} user{members.length !== 1 ? 's' : ''}
             </p>
 
-            {/* bulk action bar */}
             {selectedIds.size > 0 && (
               <div className="mb-4 p-3 bg-navy-light rounded-xl flex flex-wrap gap-2 items-center">
                 <span className="text-sm mr-2">{selectedIds.size} selected</span>
@@ -485,19 +551,50 @@ function Admin() {
                 </div>
               ))}
               {members.length === 0 && (
-                <p className="text-gray-400 py-8 text-center">
-                  No users found. (If this is unexpected, make sure you ran the SQL above to add the missing columns.)
-                </p>
+                <p className="text-gray-400 py-8 text-center">No users found for this filter.</p>
               )}
             </div>
           </div>
         )}
 
+        {/* VIEW FULL PROFILE – now includes photos */}
         {activeTab === 'profile' && selectedMember && (
           <div>
-            <button onClick={() => { setSelectedMember(null); setActiveTab('members') }} className="text-coral mb-4 text-sm">← Back to Users</button>
+            <button
+              onClick={() => {
+                setSelectedMember(null)
+                setSelectedMemberPhotos([])
+                setActiveTab('members')
+              }}
+              className="text-coral mb-4 text-sm"
+            >
+              ← Back to Users
+            </button>
+
             <h2 className="text-2xl font-semibold mb-1">{selectedMember.display_name || 'No name'}</h2>
             <p className="text-gray-400 text-sm mb-6">ID: {selectedMember.id}</p>
+
+            {/* Profile pictures */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold mb-3">Photos</h3>
+              {selectedMemberPhotos.length > 0 ? (
+                <div className="flex flex-wrap gap-3">
+                  {selectedMemberPhotos.map((url, idx) => (
+                    <img
+                      key={idx}
+                      src={url}
+                      alt={`Photo ${idx + 1}`}
+                      className="w-32 h-40 object-cover rounded-xl border-2 border-coral"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="w-32 h-40 bg-navy-light rounded-xl flex items-center justify-center text-gray-500 border border-gray-600">
+                  No photo
+                </div>
+              )}
+            </div>
+
             <div className="grid md:grid-cols-2 gap-6 mb-8">
               <div className="bg-navy-light rounded-2xl p-5 space-y-2">
                 <p><span className="text-gray-400">Gender:</span> {selectedMember.gender || '—'}</p>
