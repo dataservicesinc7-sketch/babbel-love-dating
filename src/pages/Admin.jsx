@@ -25,9 +25,8 @@ function Admin() {
   const [memberFilter, setMemberFilter] = useState('all')
   const [memberSearch, setMemberSearch] = useState('')
   const [selectedMember, setSelectedMember] = useState(null)
-  const [selectedMemberPhotos, setSelectedMemberPhotos] = useState([]) // photos for View Profile
+  const [selectedMemberPhotos, setSelectedMemberPhotos] = useState([])
 
-  // bulk selection
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkWorking, setBulkWorking] = useState(false)
 
@@ -35,6 +34,7 @@ function Admin() {
   const [reports, setReports] = useState([])
   const [photoModal, setPhotoModal] = useState(null)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [deletingSeeds, setDeletingSeeds] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -84,7 +84,6 @@ function Admin() {
     } catch (err) { console.error(err) }
   }
 
-  // Always use select('*') so missing columns never cause 400
   const loadMembers = async () => {
     try {
       let query = supabase
@@ -100,7 +99,6 @@ function Admin() {
 
       const { data, error } = await query
       if (error) {
-        console.error('loadMembers error:', error)
         setMessage('Could not load users: ' + error.message)
         setMembers([])
         return
@@ -125,12 +123,11 @@ function Admin() {
   }
 
   const loadSeeds = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('profiles')
       .select('*')
       .eq('is_seed', true)
       .order('created_at', { ascending: false })
-    if (error) console.error('loadSeeds error:', error)
     setSeedProfiles(data || [])
   }
 
@@ -141,7 +138,6 @@ function Admin() {
     } catch (_) { setReports([]) }
   }
 
-  // Load photos when viewing a full profile
   const loadMemberPhotos = async (profileId, avatarUrl) => {
     const { data: photoRows } = await supabase
       .from('photos')
@@ -151,7 +147,6 @@ function Admin() {
     const urls = (photoRows || []).map(p =>
       supabase.storage.from('profile-photos').getPublicUrl(p.storage_path).data.publicUrl
     )
-    // Fallback to seed avatar_url if no uploaded photos
     if (urls.length === 0 && avatarUrl) {
       setSelectedMemberPhotos([avatarUrl])
     } else {
@@ -187,78 +182,57 @@ function Admin() {
     if (selectedMember?.id === id) setSelectedMember(prev => ({ ...prev, is_active: true, status: 'active', is_suspended: false }))
   }
 
+  // Single permanent delete – uses the new database function
   const permanentDeleteMember = async (id, name) => {
-    if (!confirm(`PERMANENTLY delete ${name || 'this account'} and all photos? This cannot be undone.`)) return
+    if (!confirm(`PERMANENTLY delete ${name || 'this account'} and all related data? This cannot be undone.`)) return
     if (!confirm('Final confirmation – irreversible.')) return
     try {
-      // 1. Remove photos from storage + table
-      const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
-      if (photos?.length) {
-        const paths = photos.map(p => p.storage_path).filter(Boolean)
-        if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
-      }
-      await supabase.from('photos').delete().eq('profile_id', id)
-
-      // 2. Delete the profile
-      const { error } = await supabase.from('profiles').delete().eq('id', id)
+      const { data, error } = await supabase.rpc('admin_delete_profile', { target_id: id })
       if (error) {
-        setMessage('Could not delete profile (RLS may be blocking): ' + error.message)
+        setMessage('Delete failed: ' + error.message)
         return
       }
-      setMessage('Account permanently deleted.')
+      setMessage(data?.message || 'Account permanently deleted.')
       setSelectedMember(null)
       setSelectedMemberPhotos([])
       loadMembers(); loadSeeds(); loadStats()
-    } catch (err) { setMessage('Error: ' + err.message) }
+    } catch (err) {
+      setMessage('Error: ' + err.message)
+    }
   }
 
-  // FIXED: Delete all seeds + their photos, then force refresh both lists
+  // Delete ALL seeds – uses the new database function (bypasses RLS)
   const deleteAllSeeds = async () => {
-    if (!confirm(`Delete ALL ${seedProfiles.length} seed profiles and their photos? This cannot be undone.`)) return
     if (seedProfiles.length === 0) {
       setMessage('No seed profiles found.')
       return
     }
+    if (!confirm(`Delete ALL ${seedProfiles.length} seed profiles permanently? This cannot be undone.`)) return
+    if (!confirm('Final confirmation – all seed accounts will be removed from the database.')) return
 
-    setMessage('Deleting seeds… please wait')
-    let deleted = 0
-    let errors = []
+    setDeletingSeeds(true)
+    setMessage('Deleting all seeds… please wait')
 
-    for (const seed of seedProfiles) {
-      try {
-        // Remove photos first
-        const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', seed.id)
-        if (photos?.length) {
-          const paths = photos.map(p => p.storage_path).filter(Boolean)
-          if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
-        }
-        await supabase.from('photos').delete().eq('profile_id', seed.id)
-
-        // Delete the profile row
-        const { error } = await supabase.from('profiles').delete().eq('id', seed.id)
-        if (error) {
-          errors.push(`${seed.display_name || seed.id}: ${error.message}`)
-        } else {
-          deleted++
-        }
-      } catch (err) {
-        errors.push(`${seed.display_name || seed.id}: ${err.message}`)
+    try {
+      const { data, error } = await supabase.rpc('admin_delete_all_seeds')
+      if (error) {
+        setMessage('Delete failed: ' + error.message)
+        setDeletingSeeds(false)
+        return
       }
-    }
 
-    // Force refresh both lists
-    await loadSeeds()
-    await loadMembers()
-    await loadStats()
+      // Force refresh both lists
+      await loadSeeds()
+      await loadMembers()
+      await loadStats()
 
-    if (errors.length > 0) {
-      setMessage(`Deleted ${deleted} seeds. Some failed (usually RLS): ${errors.slice(0, 3).join(' | ')}`)
-    } else {
-      setMessage(`Successfully deleted ${deleted} seed profile(s).`)
+      setMessage(data?.message || `Successfully deleted ${data?.deleted || 0} seed profile(s).`)
+    } catch (err) {
+      setMessage('Error: ' + err.message)
     }
+    setDeletingSeeds(false)
   }
 
-  // bulk helpers
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -268,10 +242,7 @@ function Admin() {
     })
   }
 
-  const selectAllVisible = () => {
-    setSelectedIds(new Set(members.map(m => m.id)))
-  }
-
+  const selectAllVisible = () => setSelectedIds(new Set(members.map(m => m.id)))
   const clearSelection = () => setSelectedIds(new Set())
 
   const bulkAction = async (action) => {
@@ -300,17 +271,11 @@ function Admin() {
       await supabase.from('profiles').update({ is_suspended: false }).in('id', ids)
       setMessage(`${count} account(s) unsuspended.`)
     } else if (action === 'permanent') {
-      if (!confirm(`PERMANENTLY delete ${count} selected account(s) and their photos? This cannot be undone.`)) return
+      if (!confirm(`PERMANENTLY delete ${count} selected account(s)? This cannot be undone.`)) return
       if (!confirm('Final confirmation – irreversible.')) return
       setBulkWorking(true)
       for (const id of ids) {
-        const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
-        if (photos?.length) {
-          const paths = photos.map(p => p.storage_path).filter(Boolean)
-          if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
-        }
-        await supabase.from('photos').delete().eq('profile_id', id)
-        await supabase.from('profiles').delete().eq('id', id)
+        await supabase.rpc('admin_delete_profile', { target_id: id })
       }
       setMessage(`${count} account(s) permanently deleted.`)
     }
@@ -367,7 +332,7 @@ function Admin() {
   const viewFullProfile = async (member) => {
     setSelectedMember(member)
     setActiveTab('profile')
-    setSelectedMemberPhotos([]) // clear while loading
+    setSelectedMemberPhotos([])
     await loadMemberPhotos(member.id, member.avatar_url)
   }
 
@@ -473,7 +438,6 @@ function Admin() {
           </div>
         )}
 
-        {/* USERS TAB */}
         {activeTab === 'members' && !selectedMember && (
           <div>
             <div className="flex flex-wrap gap-3 mb-4 items-center">
@@ -488,7 +452,6 @@ function Admin() {
                 <option value="suspended">Suspended</option>
                 <option value="deactivated">Deactivated</option>
               </select>
-
               <input
                 type="text"
                 placeholder="Filter by name, city or ID (optional)..."
@@ -497,14 +460,10 @@ function Admin() {
                 onKeyUp={e => e.key === 'Enter' && loadMembers()}
                 className="px-3 py-2 rounded-lg bg-navy border border-gray-600 flex-1 min-w-[180px]"
               />
-              <button onClick={loadMembers} className="px-4 py-2 bg-coral rounded-lg text-sm">
-                Apply filter
-              </button>
+              <button onClick={loadMembers} className="px-4 py-2 bg-coral rounded-lg text-sm">Apply filter</button>
             </div>
 
-            <p className="text-sm text-gray-400 mb-3">
-              Showing {members.length} user{members.length !== 1 ? 's' : ''}
-            </p>
+            <p className="text-sm text-gray-400 mb-3">Showing {members.length} user{members.length !== 1 ? 's' : ''}</p>
 
             {selectedIds.size > 0 && (
               <div className="mb-4 p-3 bg-navy-light rounded-xl flex flex-wrap gap-2 items-center">
@@ -521,17 +480,9 @@ function Admin() {
 
             <div className="space-y-3">
               {members.map(m => (
-                <div
-                  key={m.id}
-                  className={`bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 ${selectedIds.has(m.id) ? 'ring-2 ring-coral' : ''}`}
-                >
+                <div key={m.id} className={`bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 ${selectedIds.has(m.id) ? 'ring-2 ring-coral' : ''}`}>
                   <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(m.id)}
-                      onChange={() => toggleSelect(m.id)}
-                      className="mt-1 w-5 h-5"
-                    />
+                    <input type="checkbox" checked={selectedIds.has(m.id)} onChange={() => toggleSelect(m.id)} className="mt-1 w-5 h-5" />
                     <div>
                       <p className="font-medium">
                         {m.display_name || 'No name'}
@@ -539,59 +490,36 @@ function Admin() {
                         {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
                         {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
                       </p>
-                      <p className="text-sm text-gray-400">
-                        {m.gender || '—'} · {formatLocation(m.city, m.country)} · {m.relationship_goal || '—'}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
-                      </p>
+                      <p className="text-sm text-gray-400">{m.gender || '—'} · {formatLocation(m.city, m.country)} · {m.relationship_goal || '—'}</p>
+                      <p className="text-xs text-gray-500">Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</p>
                     </div>
                   </div>
                   {renderActionButtons(m)}
                 </div>
               ))}
-              {members.length === 0 && (
-                <p className="text-gray-400 py-8 text-center">No users found for this filter.</p>
-              )}
+              {members.length === 0 && <p className="text-gray-400 py-8 text-center">No users found for this filter.</p>}
             </div>
           </div>
         )}
 
-        {/* VIEW FULL PROFILE – now includes photos */}
         {activeTab === 'profile' && selectedMember && (
           <div>
-            <button
-              onClick={() => {
-                setSelectedMember(null)
-                setSelectedMemberPhotos([])
-                setActiveTab('members')
-              }}
-              className="text-coral mb-4 text-sm"
-            >
+            <button onClick={() => { setSelectedMember(null); setSelectedMemberPhotos([]); setActiveTab('members') }} className="text-coral mb-4 text-sm">
               ← Back to Users
             </button>
-
             <h2 className="text-2xl font-semibold mb-1">{selectedMember.display_name || 'No name'}</h2>
             <p className="text-gray-400 text-sm mb-6">ID: {selectedMember.id}</p>
 
-            {/* Profile pictures */}
             <div className="mb-6">
               <h3 className="text-lg font-semibold mb-3">Photos</h3>
               {selectedMemberPhotos.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
                   {selectedMemberPhotos.map((url, idx) => (
-                    <img
-                      key={idx}
-                      src={url}
-                      alt={`Photo ${idx + 1}`}
-                      className="w-32 h-40 object-cover rounded-xl border-2 border-coral"
-                    />
+                    <img key={idx} src={url} alt={`Photo ${idx + 1}`} className="w-32 h-40 object-cover rounded-xl border-2 border-coral" />
                   ))}
                 </div>
               ) : (
-                <div className="w-32 h-40 bg-navy-light rounded-xl flex items-center justify-center text-gray-500 border border-gray-600">
-                  No photo
-                </div>
+                <div className="w-32 h-40 bg-navy-light rounded-xl flex items-center justify-center text-gray-500 border border-gray-600">No photo</div>
               )}
             </div>
 
@@ -643,8 +571,12 @@ function Admin() {
             <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
               <h2 className="text-xl font-semibold">Seed / Fake Profiles ({seedProfiles.length})</h2>
               {seedProfiles.length > 0 && (
-                <button onClick={deleteAllSeeds} className="px-4 py-2 bg-red-700 hover:bg-red-800 rounded-full text-sm">
-                  Delete All Seeds
+                <button
+                  onClick={deleteAllSeeds}
+                  disabled={deletingSeeds}
+                  className="px-4 py-2 bg-red-700 hover:bg-red-800 disabled:opacity-50 rounded-full text-sm"
+                >
+                  {deletingSeeds ? 'Deleting…' : 'Delete All Seeds'}
                 </button>
               )}
             </div>
