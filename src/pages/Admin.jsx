@@ -26,7 +26,7 @@ function Admin() {
   const [memberSearch, setMemberSearch] = useState('')
   const [selectedMember, setSelectedMember] = useState(null)
 
-  // NEW: bulk selection
+  // bulk selection
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkWorking, setBulkWorking] = useState(false)
 
@@ -83,39 +83,51 @@ function Admin() {
     } catch (err) { console.error(err) }
   }
 
+  // FIXED: use select('*') so missing columns never cause 400
+  // Immediately loads ALL users (real + seed)
   const loadMembers = async () => {
     try {
       let query = supabase
         .from('profiles')
-        .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at, last_seen, is_suspended, status, is_active, bio, date_of_birth, looking_for')
+        .select('*')
         .order('created_at', { ascending: false })
-        .limit(300)
+        .limit(500)
 
       if (memberFilter === 'seeds') query = query.eq('is_seed', true)
       if (memberFilter === 'real') query = query.or('is_seed.is.null,is_seed.eq.false')
       if (memberFilter === 'suspended') query = query.eq('is_suspended', true)
       if (memberFilter === 'deactivated') query = query.eq('is_active', false)
 
-      const { data } = await query
+      const { data, error } = await query
+      if (error) {
+        console.error('loadMembers error:', error)
+        setMessage('Could not load users: ' + error.message)
+        setMembers([])
+        return
+      }
+
       let list = data || []
       if (memberSearch.trim()) {
         const s = memberSearch.toLowerCase()
         list = list.filter(m =>
-          (m.display_name||'').toLowerCase().includes(s) ||
-          (m.city||'').toLowerCase().includes(s) ||
-          (m.gender||'').toLowerCase().includes(s) ||
-          (m.id||'').toLowerCase().includes(s)
+          (m.display_name || '').toLowerCase().includes(s) ||
+          (m.city || '').toLowerCase().includes(s) ||
+          (m.gender || '').toLowerCase().includes(s) ||
+          (m.id || '').toLowerCase().includes(s)
         )
       }
       setMembers(list)
-      setSelectedIds(new Set()) // clear selection on reload
-    } catch (err) { console.error(err) }
+      setSelectedIds(new Set())
+    } catch (err) {
+      console.error(err)
+      setMessage('Error loading users')
+    }
   }
 
   const loadSeeds = async () => {
     const { data } = await supabase
       .from('profiles')
-      .select('id, display_name, city, country, gender, relationship_goal, is_seed, created_at')
+      .select('*')
       .eq('is_seed', true)
       .order('created_at', { ascending: false })
     setSeedProfiles(data || [])
@@ -173,7 +185,7 @@ function Admin() {
     } catch (err) { setMessage('Error: ' + err.message) }
   }
 
-  // NEW: bulk helpers
+  // bulk helpers
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -348,7 +360,7 @@ function Admin() {
 
       <main className="max-w-6xl mx-auto px-4">
         <h1 className="text-3xl font-semibold mb-2">Admin Control Panel</h1>
-        <p className="text-gray-400 mb-6">Full control over every account (including seeds).</p>
+        <p className="text-gray-400 mb-6">Full control over every account (registered + seed).</p>
 
         {message && (
           <p className="mb-4 text-coral bg-navy-light px-4 py-2 rounded-lg flex justify-between items-center">
@@ -394,21 +406,40 @@ function Admin() {
           </div>
         )}
 
+        {/* USERS TAB – shows the full list immediately */}
         {activeTab === 'members' && !selectedMember && (
           <div>
-            <div className="flex flex-wrap gap-3 mb-4">
-              <select value={memberFilter} onChange={e => { setMemberFilter(e.target.value); setTimeout(loadMembers, 50) }} className="px-3 py-2 rounded-lg bg-navy border border-gray-600">
-                <option value="all">All users</option>
+            <div className="flex flex-wrap gap-3 mb-4 items-center">
+              <select
+                value={memberFilter}
+                onChange={e => { setMemberFilter(e.target.value); setTimeout(loadMembers, 50) }}
+                className="px-3 py-2 rounded-lg bg-navy border border-gray-600"
+              >
+                <option value="all">All users (registered + seed)</option>
                 <option value="real">Real only</option>
                 <option value="seeds">Seeds only</option>
                 <option value="suspended">Suspended</option>
                 <option value="deactivated">Deactivated</option>
               </select>
-              <input type="text" placeholder="Search name, city or ID..." value={memberSearch} onChange={e => setMemberSearch(e.target.value)} onKeyUp={e => e.key === 'Enter' && loadMembers()} className="px-3 py-2 rounded-lg bg-navy border border-gray-600 flex-1 min-w-[180px]" />
-              <button onClick={loadMembers} className="px-4 py-2 bg-coral rounded-lg text-sm">Search</button>
+
+              <input
+                type="text"
+                placeholder="Filter by name, city or ID (optional)..."
+                value={memberSearch}
+                onChange={e => setMemberSearch(e.target.value)}
+                onKeyUp={e => e.key === 'Enter' && loadMembers()}
+                className="px-3 py-2 rounded-lg bg-navy border border-gray-600 flex-1 min-w-[180px]"
+              />
+              <button onClick={loadMembers} className="px-4 py-2 bg-coral rounded-lg text-sm">
+                Apply filter
+              </button>
             </div>
 
-            {/* NEW: bulk action bar */}
+            <p className="text-sm text-gray-400 mb-3">
+              Showing {members.length} user{members.length !== 1 ? 's' : ''} (registered + seed accounts)
+            </p>
+
+            {/* bulk action bar */}
             {selectedIds.size > 0 && (
               <div className="mb-4 p-3 bg-navy-light rounded-xl flex flex-wrap gap-2 items-center">
                 <span className="text-sm mr-2">{selectedIds.size} selected</span>
@@ -424,7 +455,10 @@ function Admin() {
 
             <div className="space-y-3">
               {members.map(m => (
-                <div key={m.id} className={`bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 ${selectedIds.has(m.id) ? 'ring-2 ring-coral' : ''}`}>
+                <div
+                  key={m.id}
+                  className={`bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 ${selectedIds.has(m.id) ? 'ring-2 ring-coral' : ''}`}
+                >
                   <div className="flex items-start gap-3">
                     <input
                       type="checkbox"
@@ -439,14 +473,22 @@ function Admin() {
                         {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
                         {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
                       </p>
-                      <p className="text-sm text-gray-400">{m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}</p>
-                      <p className="text-xs text-gray-500">Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</p>
+                      <p className="text-sm text-gray-400">
+                        {m.gender || '—'} · {formatLocation(m.city, m.country)} · {m.relationship_goal || '—'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                      </p>
                     </div>
                   </div>
                   {renderActionButtons(m)}
                 </div>
               ))}
-              {members.length === 0 && <p className="text-gray-400">No users match this filter.</p>}
+              {members.length === 0 && (
+                <p className="text-gray-400 py-8 text-center">
+                  No users found. (If this is unexpected, make sure you ran the SQL above to add the missing columns.)
+                </p>
+              )}
             </div>
           </div>
         )}
