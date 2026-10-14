@@ -19,6 +19,10 @@ function Chat() {
   const [mediaRecorder, setMediaRecorder] = useState(null)
   const [showVideo, setShowVideo] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  // NEW: bulk selection
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const bottomRef = useRef(null)
   const fileInputRef = useRef(null)
   const jitsiContainerRef = useRef(null)
@@ -62,7 +66,7 @@ function Chat() {
     return groups
   }
 
-  // Delete any message in this match (own OR from the other person)
+  // Delete any single message in this match
   const deleteMessage = async (messageId) => {
     if (!window.confirm('Delete this message permanently? Both of you will no longer see it.')) return
     setDeletingId(messageId)
@@ -70,13 +74,77 @@ function Chat() {
       .from('messages')
       .delete()
       .eq('id', messageId)
-      .eq('match_id', matchId)   // safety: only messages belonging to this match
+      .eq('match_id', matchId)
     if (!error) {
       setMessages(prev => prev.filter(m => m.id !== messageId))
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        next.delete(messageId)
+        return next
+      })
     } else {
       alert('Could not delete: ' + error.message)
     }
     setDeletingId(null)
+  }
+
+  // NEW: Clear entire conversation
+  const clearEntireChat = async () => {
+    if (!window.confirm('Clear the ENTIRE conversation? Every message will be permanently deleted for both of you. This cannot be undone.')) return
+    if (!window.confirm('Final confirmation – delete all messages in this chat?')) return
+    setBulkDeleting(true)
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('match_id', matchId)
+    if (!error) {
+      setMessages([])
+      setSelectedIds(new Set())
+      setSelectionMode(false)
+      alert('Conversation cleared.')
+    } else {
+      alert('Could not clear chat: ' + error.message)
+    }
+    setBulkDeleting(false)
+  }
+
+  // NEW: Bulk delete selected messages
+  const bulkDeleteSelected = async () => {
+    if (selectedIds.size === 0) return
+    if (!window.confirm(`Permanently delete ${selectedIds.size} selected message(s)? Both of you will no longer see them.`)) return
+    setBulkDeleting(true)
+    const ids = Array.from(selectedIds)
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .in('id', ids)
+      .eq('match_id', matchId)
+    if (!error) {
+      setMessages(prev => prev.filter(m => !selectedIds.has(m.id)))
+      setSelectedIds(new Set())
+      setSelectionMode(false)
+    } else {
+      alert('Could not delete: ' + error.message)
+    }
+    setBulkDeleting(false)
+  }
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAllVisible = () => {
+    setSelectedIds(new Set(messages.map(m => m.id)))
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+    setSelectionMode(false)
   }
 
   // Video call
@@ -415,15 +483,53 @@ function Chat() {
           </div>
         </Link>
 
-        {/* Video Call Button */}
-        <button
-          onClick={startVideoCall}
-          disabled={blocked}
-          className="bg-coral hover:bg-coral/90 disabled:opacity-40 text-white text-sm font-medium px-3 py-1.5 rounded-full flex items-center gap-1"
-          title="Start private video call"
-        >
-          📹 Video
-        </button>
+        <div className="flex items-center gap-2">
+          {/* NEW: selection / clear controls */}
+          {!selectionMode ? (
+            <>
+              <button
+                onClick={() => setSelectionMode(true)}
+                className="text-xs border border-gray-600 px-2 py-1 rounded-full hover:border-coral"
+                title="Select messages to delete"
+              >
+                Select
+              </button>
+              <button
+                onClick={clearEntireChat}
+                disabled={messages.length === 0 || bulkDeleting}
+                className="text-xs border border-red-700 text-red-400 px-2 py-1 rounded-full hover:bg-red-900/40 disabled:opacity-40"
+                title="Clear entire conversation"
+              >
+                Clear chat
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={selectAllVisible} className="text-xs border border-gray-600 px-2 py-1 rounded-full">
+                All
+              </button>
+              <button
+                onClick={bulkDeleteSelected}
+                disabled={selectedIds.size === 0 || bulkDeleting}
+                className="text-xs bg-red-700 px-2 py-1 rounded-full disabled:opacity-40"
+              >
+                Delete ({selectedIds.size})
+              </button>
+              <button onClick={clearSelection} className="text-xs border border-gray-600 px-2 py-1 rounded-full">
+                Cancel
+              </button>
+            </>
+          )}
+
+          <button
+            onClick={startVideoCall}
+            disabled={blocked}
+            className="bg-coral hover:bg-coral/90 disabled:opacity-40 text-white text-sm font-medium px-3 py-1.5 rounded-full flex items-center gap-1"
+            title="Start private video call"
+          >
+            📹 Video
+          </button>
+        </div>
       </header>
 
       {blocked && (
@@ -457,12 +563,25 @@ function Chat() {
               const mediaUrl = m.media_path
                 ? supabase.storage.from('chat-media').getPublicUrl(m.media_path).data.publicUrl
                 : null
+              const isSelected = selectedIds.has(m.id)
 
               return (
                 <div
                   key={m.id}
-                  className={`max-w-[80%] p-3 rounded-2xl mb-2 relative group ${isMe ? 'ml-auto bg-coral' : 'bg-navy-light'}`}
+                  className={`max-w-[80%] p-3 rounded-2xl mb-2 relative group ${
+                    isMe ? 'ml-auto bg-coral' : 'bg-navy-light'
+                  } ${isSelected ? 'ring-2 ring-yellow-400' : ''}`}
                 >
+                  {/* NEW: selection checkbox */}
+                  {selectionMode && (
+                    <button
+                      onClick={() => toggleSelect(m.id)}
+                      className="absolute -left-8 top-3 w-5 h-5 rounded border-2 border-white flex items-center justify-center text-xs bg-navy"
+                    >
+                      {isSelected ? '✓' : ''}
+                    </button>
+                  )}
+
                   <p className="text-xs opacity-70 mb-1">{isMe ? 'You' : otherName}</p>
 
                   {m.message_type === 'image' && mediaUrl && (
@@ -490,15 +609,16 @@ function Chat() {
                     <p className="text-xs opacity-60">
                       {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
-                    {/* Delete button now available for ALL messages in the match */}
-                    <button
-                      onClick={() => deleteMessage(m.id)}
-                      disabled={deletingId === m.id}
-                      className="text-xs opacity-0 group-hover:opacity-100 transition-opacity ml-2 underline"
-                      title="Delete this message"
-                    >
-                      {deletingId === m.id ? '…' : 'Delete'}
-                    </button>
+                    {!selectionMode && (
+                      <button
+                        onClick={() => deleteMessage(m.id)}
+                        disabled={deletingId === m.id}
+                        className="text-xs opacity-0 group-hover:opacity-100 transition-opacity ml-2 underline"
+                        title="Delete this message"
+                      >
+                        {deletingId === m.id ? '…' : 'Delete'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )
@@ -514,9 +634,9 @@ function Chat() {
         {recording && (
           <p className="text-center text-xs text-red-400 mb-2 animate-pulse">Recording... tap stop when finished</p>
         )}
+        {bulkDeleting && <p className="text-center text-xs text-yellow-400 mb-2">Deleting…</p>}
 
         <form onSubmit={sendText} className="flex gap-2 items-center">
-          {/* Attachment button */}
           <button
             type="button"
             disabled={blocked || uploading}
@@ -534,7 +654,6 @@ function Chat() {
             onChange={handleFileSelect}
           />
 
-          {/* Voice note button */}
           {!recording ? (
             <button
               type="button"
@@ -560,12 +679,12 @@ function Chat() {
             value={newMsg}
             onChange={e => setNewMsg(e.target.value)}
             placeholder={blocked ? 'Messaging disabled' : `Message ${otherName}...`}
-            disabled={blocked || uploading}
+            disabled={blocked || uploading || selectionMode}
             className="flex-1 px-4 py-3 rounded-full bg-navy-light border border-gray-600 focus:outline-none focus:border-coral disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={blocked || uploading}
+            disabled={blocked || uploading || selectionMode}
             className="bg-coral px-5 py-3 rounded-full font-medium disabled:opacity-50"
           >
             Send
