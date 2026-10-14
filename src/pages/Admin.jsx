@@ -26,6 +26,10 @@ function Admin() {
   const [memberSearch, setMemberSearch] = useState('')
   const [selectedMember, setSelectedMember] = useState(null)
 
+  // NEW: bulk selection
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [bulkWorking, setBulkWorking] = useState(false)
+
   const [seedProfiles, setSeedProfiles] = useState([])
   const [reports, setReports] = useState([])
   const [photoModal, setPhotoModal] = useState(null)
@@ -104,6 +108,7 @@ function Admin() {
         )
       }
       setMembers(list)
+      setSelectedIds(new Set()) // clear selection on reload
     } catch (err) { console.error(err) }
   }
 
@@ -166,6 +171,68 @@ function Admin() {
       setSelectedMember(null)
       loadMembers(); loadSeeds(); loadStats()
     } catch (err) { setMessage('Error: ' + err.message) }
+  }
+
+  // NEW: bulk helpers
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAllVisible = () => {
+    setSelectedIds(new Set(members.map(m => m.id)))
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const bulkAction = async (action) => {
+    if (selectedIds.size === 0) return
+    const count = selectedIds.size
+    const ids = Array.from(selectedIds)
+
+    if (action === 'deactivate') {
+      if (!confirm(`Deactivate ${count} selected account(s)?`)) return
+      setBulkWorking(true)
+      await supabase.from('profiles').update({ is_active: false, status: 'deactivated' }).in('id', ids)
+      setMessage(`${count} account(s) deactivated.`)
+    } else if (action === 'restore') {
+      if (!confirm(`Restore ${count} selected account(s)?`)) return
+      setBulkWorking(true)
+      await supabase.from('profiles').update({ is_active: true, status: 'active', is_suspended: false }).in('id', ids)
+      setMessage(`${count} account(s) restored.`)
+    } else if (action === 'suspend') {
+      if (!confirm(`Suspend ${count} selected account(s)?`)) return
+      setBulkWorking(true)
+      await supabase.from('profiles').update({ is_suspended: true }).in('id', ids)
+      setMessage(`${count} account(s) suspended.`)
+    } else if (action === 'unsuspend') {
+      if (!confirm(`Unsuspend ${count} selected account(s)?`)) return
+      setBulkWorking(true)
+      await supabase.from('profiles').update({ is_suspended: false }).in('id', ids)
+      setMessage(`${count} account(s) unsuspended.`)
+    } else if (action === 'permanent') {
+      if (!confirm(`PERMANENTLY delete ${count} selected account(s) and their photos? This cannot be undone.`)) return
+      if (!confirm('Final confirmation – irreversible.')) return
+      setBulkWorking(true)
+      for (const id of ids) {
+        const { data: photos } = await supabase.from('photos').select('storage_path').eq('profile_id', id)
+        if (photos?.length) {
+          const paths = photos.map(p => p.storage_path).filter(Boolean)
+          if (paths.length) await supabase.storage.from('profile-photos').remove(paths)
+        }
+        await supabase.from('photos').delete().eq('profile_id', id)
+        await supabase.from('profiles').delete().eq('id', id)
+      }
+      setMessage(`${count} account(s) permanently deleted.`)
+    }
+
+    setBulkWorking(false)
+    setSelectedIds(new Set())
+    loadMembers(); loadSeeds(); loadStats()
   }
 
   const deleteAllSeeds = async () => {
@@ -281,7 +348,7 @@ function Admin() {
 
       <main className="max-w-6xl mx-auto px-4">
         <h1 className="text-3xl font-semibold mb-2">Admin Control Panel</h1>
-        <p className="text-gray-400 mb-6">Full control over every account.</p>
+        <p className="text-gray-400 mb-6">Full control over every account (including seeds).</p>
 
         {message && (
           <p className="mb-4 text-coral bg-navy-light px-4 py-2 rounded-lg flex justify-between items-center">
@@ -341,18 +408,40 @@ function Admin() {
               <button onClick={loadMembers} className="px-4 py-2 bg-coral rounded-lg text-sm">Search</button>
             </div>
 
+            {/* NEW: bulk action bar */}
+            {selectedIds.size > 0 && (
+              <div className="mb-4 p-3 bg-navy-light rounded-xl flex flex-wrap gap-2 items-center">
+                <span className="text-sm mr-2">{selectedIds.size} selected</span>
+                <button onClick={() => bulkAction('deactivate')} disabled={bulkWorking} className="px-3 py-1.5 bg-orange-700 rounded-lg text-sm">Deactivate</button>
+                <button onClick={() => bulkAction('restore')} disabled={bulkWorking} className="px-3 py-1.5 bg-green-700 rounded-lg text-sm">Restore</button>
+                <button onClick={() => bulkAction('suspend')} disabled={bulkWorking} className="px-3 py-1.5 bg-yellow-600 rounded-lg text-sm">Suspend</button>
+                <button onClick={() => bulkAction('unsuspend')} disabled={bulkWorking} className="px-3 py-1.5 bg-yellow-800 rounded-lg text-sm">Unsuspend</button>
+                <button onClick={() => bulkAction('permanent')} disabled={bulkWorking} className="px-3 py-1.5 bg-red-700 rounded-lg text-sm">Permanent Delete</button>
+                <button onClick={clearSelection} className="px-3 py-1.5 border border-gray-600 rounded-lg text-sm">Clear</button>
+                <button onClick={selectAllVisible} className="px-3 py-1.5 border border-gray-600 rounded-lg text-sm">Select all visible</button>
+              </div>
+            )}
+
             <div className="space-y-3">
               {members.map(m => (
-                <div key={m.id} className="bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium">
-                      {m.display_name || 'No name'}
-                      {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
-                      {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
-                      {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
-                    </p>
-                    <p className="text-sm text-gray-400">{m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}</p>
-                    <p className="text-xs text-gray-500">Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</p>
+                <div key={m.id} className={`bg-navy-light p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 ${selectedIds.has(m.id) ? 'ring-2 ring-coral' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(m.id)}
+                      onChange={() => toggleSelect(m.id)}
+                      className="mt-1 w-5 h-5"
+                    />
+                    <div>
+                      <p className="font-medium">
+                        {m.display_name || 'No name'}
+                        {m.is_seed && <span className="ml-2 text-xs bg-yellow-600 px-2 py-0.5 rounded-full">SEED</span>}
+                        {m.is_suspended && <span className="ml-2 text-xs bg-red-700 px-2 py-0.5 rounded-full">SUSPENDED</span>}
+                        {m.is_active === false && <span className="ml-2 text-xs bg-orange-700 px-2 py-0.5 rounded-full">DEACTIVATED</span>}
+                      </p>
+                      <p className="text-sm text-gray-400">{m.gender} · {formatLocation(m.city, m.country)} · {m.relationship_goal}</p>
+                      <p className="text-xs text-gray-500">Joined {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</p>
+                    </div>
                   </div>
                   {renderActionButtons(m)}
                 </div>
