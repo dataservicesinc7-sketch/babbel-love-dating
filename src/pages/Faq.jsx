@@ -46,7 +46,6 @@ const faqs = [
 
 function Faq() {
   useEffect(() => {
-    // Add FAQ structured data for Google
     const script = document.createElement('script')
     script.type = 'application/ld+json'
     script.text = JSON.stringify({
@@ -63,7 +62,9 @@ function Faq() {
     })
     document.head.appendChild(script)
     return () => {
-      document.head.removeChild(script)
+      if (script.parentNode) {
+        document.head.removeChild(script)
+      }
     }
   }, [])
 
