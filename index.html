@@ -41,6 +41,34 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
+
+    <!-- Structured Data (JSON-LD) for better discoverability -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Babbel Love Dating",
+      "url": "https://babbel-love-dating.pages.dev/",
+      "logo": "https://babbel-love-dating.pages.dev/favicon.svg",
+      "description": "A free, safe and inclusive online dating community for adults of every age, race and culture. Real connections for friendship, dating, long-term relationships or marriage.",
+      "sameAs": []
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Babbel Love Dating",
+      "url": "https://babbel-love-dating.pages.dev/",
+      "description": "Safe dating for every age, culture and love story. Free to join.",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://babbel-love-dating.pages.dev/signup",
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
