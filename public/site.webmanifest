@@ -1,0 +1,17 @@
+{
+  "name": "Babbel Love Dating",
+  "short_name": "Babbel Love",
+  "description": "Safe, free and inclusive dating for every age, culture and love story",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1F2A44",
+  "theme_color": "#1F2A44",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
