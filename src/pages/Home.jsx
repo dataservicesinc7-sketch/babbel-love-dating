@@ -69,7 +69,6 @@ function Home() {
         url: shareUrl
       }).catch(() => {})
     } else {
-      // Fallback to WhatsApp
       window.open(`https://wa.me/?text=${encodeURIComponent(shareText + ' ' + shareUrl)}`, '_blank')
     }
   }
@@ -98,7 +97,6 @@ function Home() {
     navigator.clipboard.writeText(shareUrl).then(() => {
       alert('Link copied to clipboard!')
     }).catch(() => {
-      // Fallback for older browsers
       const input = document.createElement('input')
       input.value = shareUrl
       document.body.appendChild(input)
@@ -122,6 +120,7 @@ function Home() {
             <a href="#how-it-works" className="hover:text-coral transition">How it works</a>
             <a href="#why-us" className="hover:text-coral transition">Why us</a>
             <Link to="/safety" className="hover:text-coral transition">Safety</Link>
+            <Link to="/faq" className="hover:text-coral transition">FAQ</Link>
 
             {checking ? null : user ? (
               <Link to="/dashboard" className="bg-coral hover:bg-coral-dark px-5 py-2 rounded-full transition">
@@ -312,6 +311,7 @@ function Home() {
           <div>© 2026 Babbel Love Dating. Built free. Built safe. Built for everyone.</div>
           <div className="flex gap-6">
             <Link to="/safety" className="hover:text-coral">Safety Center</Link>
+            <Link to="/faq" className="hover:text-coral">FAQ</Link>
             {user ? (
               <Link to="/dashboard" className="hover:text-coral">Dashboard</Link>
             ) : (
