@@ -11,6 +11,7 @@ import Safety from './pages/Safety'
 import ViewProfile from './pages/ViewProfile'
 import Blocked from './pages/Blocked'
 import Admin from './pages/Admin'
+import Faq from './pages/Faq'
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="/matches" element={<Matches />} />
           <Route path="/chat/:matchId" element={<Chat />} />
           <Route path="/safety" element={<Safety />} />
+          <Route path="/faq" element={<Faq />} />
           <Route path="/blocked" element={<Blocked />} />
           <Route path="/admin" element={<Admin />} />
         </Routes>
